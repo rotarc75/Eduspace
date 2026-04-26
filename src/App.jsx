@@ -1,29 +1,30 @@
 import { useState } from 'react'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import { AppProvider, useApp } from './context/AppContext'
 import Sidebar from './shared/Sidebar'
 import Modal from './shared/Modal'
 import ErrorBoundary from './shared/ErrorBoundary'
-import Accueil     from './views/Accueil'
-import MatiereView from './views/MatiereView'
-import Devoirs     from './views/Devoirs'
-import Tickets     from './views/Tickets'
-import Journal     from './views/Journal'
-import Settings    from './views/Settings'
+import LoginScreen    from './views/LoginScreen'
+import ProfDashboard  from './views/ProfDashboard'
+import Accueil        from './views/Accueil'
+import MatiereView    from './views/MatiereView'
+import Devoirs        from './views/Devoirs'
+import Tickets        from './views/Tickets'
+import Journal        from './views/Journal'
+import Settings       from './views/Settings'
 
-function AppInner() {
-  const { loading, dbError, profPwd, tickets, devoirs, nextSession } = useApp()
+// ── Workspace (espace d'un élève) ────────────────────────────────
+function Workspace({ isProf }) {
+  const { tickets, devoirs, nextSession, loading, dbError } = useApp()
+  const { studentName, backToDashboard, role, logout } = useAuth()
 
-  const [role,          setRole]          = useState('eleve')
-  const [tab,           setTab]           = useState('accueil')
-  const [showAuth,      setShowAuth]      = useState(false)
-  const [pwd,           setPwd]           = useState('')
-  const [pwdErr,        setPwdErr]        = useState(false)
+  const [tab,             setTab]             = useState('accueil')
+  const [showAuth,        setShowAuth]        = useState(false)
   const [highlightDevoir, setHighlightDevoir] = useState(null)
 
-  const isProf         = role === 'prof'
-  const openTickets    = (tickets ?? []).filter((t) => t.statut === 'ouvert').length
+  const openTickets    = (tickets ?? []).filter(t => t.statut === 'ouvert').length
   const pendingDevoirs = (devoirs ?? []).filter(
-    (d) => !d.done && d.deadline && new Date(d.deadline) >= new Date(new Date().toDateString())
+    d => !d.done && d.deadline && new Date(d.deadline) >= new Date(new Date().toDateString())
   ).length
 
   function gotoDevoir(id) {
@@ -31,37 +32,11 @@ function AppInner() {
     setTab('devoirs')
   }
 
-  function login() {
-    if (pwd === profPwd) {
-      setRole('prof'); setShowAuth(false); setPwd(''); setPwdErr(false)
-    } else {
-      setPwdErr(true)
-    }
-  }
+  if (loading) return <div className="loading-screen"><div className="loading-spinner" /><p>Chargement…</p></div>
+  if (dbError)  return <div className="loading-screen"><p className="db-error">⚠️ {dbError}</p></div>
 
-  if (loading) {
-    return (
-      <div className="loading-screen">
-        <div className="loading-spinner" />
-        <p>Chargement…</p>
-      </div>
-    )
-  }
-
-  if (dbError) {
-    return (
-      <div className="loading-screen">
-        <p className="db-error">⚠️ {dbError}</p>
-        <p style={{ fontSize: 13, marginTop: 8, color: 'var(--text-muted)' }}>
-          Vérifie ton fichier <code>.env</code> et relance <code>npm run dev</code>.
-        </p>
-      </div>
-    )
-  }
-
-  // Rendu conditionnel — un seul composant à la fois + ErrorBoundary individuel
   function renderView() {
-    const wrap = (node) => <ErrorBoundary key={tab}>{node}</ErrorBoundary>
+    const wrap = node => <ErrorBoundary key={tab}>{node}</ErrorBoundary>
     switch (tab) {
       case 'maths':    return wrap(<MatiereView matiere="maths" isProf={isProf} />)
       case 'infos':    return wrap(<MatiereView matiere="infos" isProf={isProf} />)
@@ -76,55 +51,82 @@ function AppInner() {
   return (
     <div className="app-layout">
       <Sidebar
-        tab={tab}
-        setTab={setTab}
+        tab={tab} setTab={setTab}
         isProf={isProf}
+        studentName={studentName}
         openTickets={openTickets}
         pendingDevoirs={pendingDevoirs}
         nextSession={nextSession}
         onAuthRequest={() => setShowAuth(true)}
-        onLogout={() => { setRole('eleve'); if (tab === 'settings') setTab('accueil') }}
+        onBackToDashboard={role === 'prof' ? backToDashboard : null}
+        onLogout={logout}
       />
+      <main className="main-content">{renderView()}</main>
 
-      <main className="main-content">
-        {renderView()}
-      </main>
-
-      <Modal
-        open={showAuth}
-        onClose={() => { setShowAuth(false); setPwd(''); setPwdErr(false) }}
-        title="Accès professeur"
-        size="sm"
-      >
-        <div className="form-stack">
-          <div className="form-group">
-            <label className="form-label">Mot de passe</label>
-            <input
-              type="password" placeholder="••••••••" value={pwd}
-              className={pwdErr ? 'error' : ''}
-              onChange={(e) => { setPwd(e.target.value); setPwdErr(false) }}
-              onKeyDown={(e) => e.key === 'Enter' && login()}
-              autoFocus
-            />
-            {pwdErr && <span className="form-error">Mot de passe incorrect</span>}
-          </div>
-          <div className="btn-row">
-            <button className="btn-primary btn-full" onClick={login}>Connexion</button>
-            <button onClick={() => { setShowAuth(false); setPwd(''); setPwdErr(false) }}>Annuler</button>
-          </div>
-          <p className="form-hint">Par défaut : <strong>prof2024</strong></p>
-        </div>
+      <Modal open={showAuth} onClose={() => setShowAuth(false)} title="Accès professeur" size="sm">
+        <ProfLoginInline onClose={() => setShowAuth(false)} />
       </Modal>
     </div>
+  )
+}
+
+function ProfLoginInline({ onClose }) {
+  const { loginProf } = useAuth()
+  const [pwd, setPwd] = useState('')
+  const [err, setErr] = useState(false)
+  function submit() {
+    const ok = loginProf(pwd)
+    if (ok) onClose()
+    else setErr(true)
+  }
+  return (
+    <div className="form-stack">
+      <div className="form-group">
+        <label className="form-label">Mot de passe professeur</label>
+        <input type="password" placeholder="••••••••" value={pwd} className={err ? 'error' : ''}
+          onChange={e => { setPwd(e.target.value); setErr(false) }}
+          onKeyDown={e => e.key === 'Enter' && submit()} autoFocus />
+        {err && <span className="form-error">Mot de passe incorrect</span>}
+      </div>
+      <div className="btn-row">
+        <button className="btn-primary btn-full" onClick={submit}>Connexion</button>
+        <button onClick={onClose}>Annuler</button>
+      </div>
+      <p className="form-hint">Par défaut : <strong>prof2024</strong></p>
+    </div>
+  )
+}
+
+// ── Routeur principal ────────────────────────────────────────────
+function AppRouter() {
+  const { role, studentId, authLoading, dbError } = useAuth()
+
+  if (authLoading) return <div className="loading-screen"><div className="loading-spinner" /><p>Chargement…</p></div>
+  if (dbError)     return <div className="loading-screen"><p className="db-error">⚠️ {dbError}</p><p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8 }}>Vérifie ton fichier <code>.env</code>.</p></div>
+
+  // Pas connecté
+  if (!role) return <LoginScreen />
+
+  // Prof sans élève sélectionné → tableau de bord
+  if (role === 'prof' && !studentId) return <ProfDashboard />
+
+  // Prof dans l'espace d'un élève, ou élève connecté
+  const isProf = role === 'prof'
+  return (
+    <ErrorBoundary>
+      <AppProvider studentId={studentId}>
+        <Workspace isProf={isProf} />
+      </AppProvider>
+    </ErrorBoundary>
   )
 }
 
 export default function App() {
   return (
     <ErrorBoundary>
-      <AppProvider>
-        <AppInner />
-      </AppProvider>
+      <AuthProvider>
+        <AppRouter />
+      </AuthProvider>
     </ErrorBoundary>
   )
 }
