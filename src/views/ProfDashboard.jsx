@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import Icon from '../shared/Icon'
 import Modal from '../shared/Modal'
 
-const fmt      = d => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : null
+const fmt = d => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : null
 const fmtShort = d => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null
 const fmtNext  = d => {
   if (!d) return null
@@ -57,6 +57,93 @@ function AccountForm({ fields, onSave, saving, error, isEdit }) {
         {saving ? 'Enregistrement…' : isEdit ? 'Mettre à jour' : 'Créer le compte'}
       </button>
     </div>
+  )
+}
+
+// ── Modal "Mon compte" — accessible à tous les profs ─────────────
+function MyAccountModal({ open, onClose }) {
+  const { profId, profName, professors, updateCurrentProf } = useAuth()
+  const current = professors.find(p => p.id === profId)
+
+  const [form,   setForm]   = useState({ name: '', username: '', password: '', confirm: '' })
+  const [msg,    setMsg]    = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  // Pré-remplir dès que les données sont dispo
+  useEffect(() => {
+    if (current) {
+      setForm(f => ({ ...f, name: current.name, username: current.username, password: '', confirm: '' }))
+    }
+  }, [current?.id])
+
+  async function handleSave() {
+    setMsg(null)
+    if (!form.name.trim() || !form.username.trim()) {
+      setMsg({ ok: false, text: "Nom et identifiant obligatoires." }); return
+    }
+    if (form.password && form.password !== form.confirm) {
+      setMsg({ ok: false, text: "Les mots de passe ne correspondent pas." }); return
+    }
+    if (form.password && form.password.length < 4) {
+      setMsg({ ok: false, text: "Mot de passe trop court (min. 4 caractères)." }); return
+    }
+    setSaving(true)
+    const err = await updateCurrentProf({
+      name:     form.name.trim(),
+      username: form.username.trim(),
+      password: form.password || null,
+    })
+    setSaving(false)
+    if (err) setMsg({ ok: false, text: err.message })
+    else {
+      setMsg({ ok: true, text: "Modifications enregistrées !" })
+      setForm(f => ({ ...f, password: '', confirm: '' }))
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Mon compte" size="sm">
+      <div className="form-stack">
+        <div className="form-group">
+          <label className="form-label">Nom affiché</label>
+          <input value={form.name} placeholder="Votre nom…"
+            onChange={e => { setForm({ ...form, name: e.target.value }); setMsg(null) }} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Identifiant de connexion</label>
+          <input value={form.username} placeholder="Votre identifiant…"
+            onChange={e => { setForm({ ...form, username: e.target.value }); setMsg(null) }} />
+        </div>
+        <hr className="divider" />
+        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          Nouveau mot de passe <span style={{ color: 'var(--text-hint)' }}>(laisser vide pour garder l'actuel)</span>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Nouveau mot de passe</label>
+          <input type="password" placeholder="••••••••" value={form.password}
+            onChange={e => { setForm({ ...form, password: e.target.value }); setMsg(null) }} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Confirmer</label>
+          <input type="password" placeholder="••••••••" value={form.confirm}
+            onChange={e => { setForm({ ...form, confirm: e.target.value }); setMsg(null) }}
+            onKeyDown={e => e.key === 'Enter' && handleSave()} />
+        </div>
+        {msg && (
+          <div style={{
+            fontSize: 13, padding: '8px 12px', borderRadius: 'var(--r-sm)', fontWeight: 500,
+            color:      msg.ok ? 'var(--green)' : 'var(--red)',
+            background: msg.ok ? 'var(--green-bg)' : 'var(--red-bg)',
+            border: `1px solid ${msg.ok ? 'var(--green-border)' : 'var(--red-border)'}`,
+          }}>
+            {msg.text}
+          </div>
+        )}
+        <button className="btn-primary btn-full" onClick={handleSave} disabled={saving}>
+          {saving ? 'Enregistrement…' : 'Enregistrer'}
+        </button>
+      </div>
+    </Modal>
   )
 }
 
@@ -141,6 +228,9 @@ export default function ProfDashboard() {
               <Icon name="plus" size={14} /> Nouveau prof
             </button>
           )}
+          <button onClick={() => { setModal({ type: 'myaccount' }); setFormErr(null) }} style={{ fontSize: 12 }}>
+            <Icon name="settings" size={13} /> Mon compte
+          </button>
           <button className="btn-ghost" onClick={logout} style={{ fontSize: 12 }}>
             <Icon name="log-out" size={13} /> Déconnexion
           </button>
@@ -404,6 +494,12 @@ export default function ProfDashboard() {
           </div>
         </Modal>
       )}
+
+      {/* Mon compte */}
+      <MyAccountModal
+        open={!!modal && modal.type === 'myaccount'}
+        onClose={() => { setModal(null); setFormErr(null) }}
+      />
     </div>
   )
 }
