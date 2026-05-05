@@ -1,39 +1,24 @@
 -- ============================================================
--- MIGRATION FIX — À exécuter dans Supabase > SQL Editor
--- Règle les chapitres + ajoute les comptes professeurs
+-- MIGRATION FINALE — Supabase > SQL Editor > New query > Run
 -- ============================================================
 
--- 1. CORRECTION CRITIQUE : rendre matiere nullable
---    (cause des chapitres qui ne s'affichent pas)
+-- 1. Correction contrainte matiere (bug chapitres invisibles)
 alter table chapters  alter column matiere drop not null;
 alter table resources alter column matiere drop not null;
-
--- Supprimer les contraintes CHECK qui bloquent les nouvelles valeurs
 alter table chapters  drop constraint if exists chapters_matiere_check;
 alter table resources drop constraint if exists resources_matiere_check;
 
--- 2. Ajouter subject_id si pas déjà fait
+-- 2. Colonnes subject_id
 alter table chapters  add column if not exists subject_id uuid references subjects(id) on delete cascade;
 alter table resources add column if not exists subject_id uuid references subjects(id) on delete set null;
 
--- 3. Table sujets (si pas déjà créée)
-create table if not exists subjects (
-  id         uuid primary key default gen_random_uuid(),
-  student_id uuid not null references students(id) on delete cascade,
-  name       text not null,
-  color      text not null default 'blue',
-  created_at timestamptz default now()
-);
-alter table subjects enable row level security;
-create policy "public_all" on subjects for all using (true) with check (true);
-
--- 4. Soumissions élèves dans devoirs (si pas déjà fait)
+-- 3. Colonnes devoirs (soumissions élèves + matière dynamique)
 alter table devoirs add column if not exists subject_id      uuid references subjects(id) on delete set null;
 alter table devoirs add column if not exists submission_url  text;
 alter table devoirs add column if not exists submission_name text;
 alter table devoirs add column if not exists submitted_at    timestamptz;
 
--- 5. TABLE PROFESSEURS (multi-comptes)
+-- 4. Table professeurs
 create table if not exists professors (
   id         uuid primary key default gen_random_uuid(),
   name       text not null,
@@ -42,11 +27,20 @@ create table if not exists professors (
   is_owner   boolean not null default false,
   created_at timestamptz default now()
 );
-alter table professors enable row level security;
-create policy "public_all" on professors for all using (true) with check (true);
 
--- Créer le compte prof par défaut (identifiant: prof / mdp: prof2024)
--- is_owner = true → peut gérer les autres profs
+alter table professors enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where tablename = 'professors' and policyname = 'public_all'
+  ) then
+    execute 'create policy "public_all" on professors for all using (true) with check (true)';
+  end if;
+end $$;
+
+-- 5. Compte prof par défaut (identifiant: prof / mdp: prof2024)
 insert into professors (name, username, password, is_owner)
 values ('Professeur', 'prof', 'prof2024', true)
 on conflict (username) do nothing;

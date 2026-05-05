@@ -90,6 +90,45 @@ export function AuthProvider({ children }) {
     localStorage.removeItem('eduspace_session')
   }
 
+  // ── Auto-inscription professeur ────────────────────────────────
+  async function registerProfessor({ name, username, password }) {
+    // Vérifier que l'identifiant n'est pas déjà pris
+    const taken = professors.some(p => p.username.toLowerCase() === username.trim().toLowerCase())
+    if (taken) return { message: 'Cet identifiant est déjà utilisé.' }
+
+    const { data, error } = await supabase.from('professors')
+      .insert([{ name: name.trim(), username: username.trim(), password, is_owner: false }]).select()
+    if (error) return error
+    if (data) {
+      const prof = data[0]
+      setProfessors(p => [...p, prof].sort((a,b) => a.name.localeCompare(b.name)))
+      // Connexion automatique après inscription
+      setRole('prof'); setProfId(prof.id); setProfName(prof.name); setIsOwner(false)
+      setStudentId(null); setStudentName(null)
+      persist({ role: 'prof', profId: prof.id, profName: prof.name, isOwner: false, studentId: null, studentName: null })
+    }
+    return null
+  }
+
+  // ── Modifier son propre compte (pseudo + mdp) ──────────────────
+  async function updateCurrentProf({ name, username, password }) {
+    // Vérifier que le nouveau username n'est pas pris par quelqu'un d'autre
+    const taken = professors.some(p => p.username.toLowerCase() === username.trim().toLowerCase() && p.id !== profId)
+    if (taken) return { message: 'Cet identifiant est déjà utilisé par un autre professeur.' }
+
+    const fields = { name: name.trim(), username: username.trim() }
+    if (password) fields.password = password
+
+    const { error } = await supabase.from('professors').update(fields).eq('id', profId)
+    if (!error) {
+      setProfessors(p => p.map(pr => pr.id === profId ? { ...pr, ...fields } : pr))
+      setProfName(name.trim())
+      // Mettre à jour la session
+      persist({ role: 'prof', profId, profName: name.trim(), isOwner, studentId, studentName })
+    }
+    return error ?? null
+  }
+
   // ── Gestion élèves ─────────────────────────────────────────────
   async function createStudent({ name, username, password }) {
     const { data, error } = await supabase.from('students').insert([{ name, username, password }]).select()
@@ -133,6 +172,7 @@ export function AuthProvider({ children }) {
       authLoading, dbError,
       loginProf, loginStudent,
       selectStudent, backToDashboard, logout,
+      registerProfessor, updateCurrentProf,
       createStudent, updateStudent, deleteStudent,
       createProfessor, updateProfessor, deleteProfessor,
     }}>
