@@ -4,18 +4,20 @@ import { supabase } from '../lib/supabase'
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [role,        setRole]        = useState(null)   // 'prof' | 'student' | null
+  const [role,        setRole]        = useState(null)
   const [profId,      setProfId]      = useState(null)
   const [profName,    setProfName]    = useState(null)
   const [isOwner,     setIsOwner]     = useState(false)
   const [studentId,   setStudentId]   = useState(null)
   const [studentName, setStudentName] = useState(null)
-  const [students,    setStudents]    = useState([])
+  const [allStudents, setAllStudents] = useState([])   // tous (pour auth élève)
   const [professors,  setProfessors]  = useState([])
   const [authLoading, setAuthLoading] = useState(true)
   const [dbError,     setDbError]     = useState(null)
 
   useEffect(() => {
+    // Lire la session sauvegardée
+    let savedProfId = null
     try {
       const saved = JSON.parse(localStorage.getItem('eduspace_session') || 'null')
       if (saved?.role) {
@@ -25,12 +27,13 @@ export function AuthProvider({ children }) {
         setIsOwner(saved.isOwner || false)
         setStudentId(saved.studentId || null)
         setStudentName(saved.studentName || null)
+        savedProfId = saved.profId || null
       }
     } catch {}
-    loadInit()
+    loadInit(savedProfId)
   }, [])
 
-  async function loadInit() {
+  async function loadInit(currentProfId) {
     try {
       const [s, p] = await Promise.all([
         supabase.from('students').select('*').order('name'),
@@ -38,14 +41,17 @@ export function AuthProvider({ children }) {
       ])
       if (s.error) throw s.error
       if (p.error) throw p.error
-      setStudents(s.data ?? [])
-      setProfessors(p.data ?? [])
+      setAllStudents(s.data ?? [])
+      setProfessors(p.data  ?? [])
     } catch (e) {
       console.error(e)
       setDbError('Impossible de se connecter à Supabase.')
     }
     setAuthLoading(false)
   }
+
+  // Élèves visibles = ceux appartenant au prof connecté
+  const students = allStudents.filter(s => s.prof_id === profId)
 
   function persist(data) {
     localStorage.setItem('eduspace_session', JSON.stringify(data))
@@ -65,7 +71,8 @@ export function AuthProvider({ children }) {
   }
 
   function loginStudent(username, password) {
-    const student = students.find(
+    // Chercher dans TOUS les élèves (pas seulement ceux d'un prof)
+    const student = allStudents.find(
       s => s.username.toLowerCase() === username.trim().toLowerCase() && s.password === password
     )
     if (!student) return false
@@ -92,17 +99,14 @@ export function AuthProvider({ children }) {
 
   // ── Auto-inscription professeur ────────────────────────────────
   async function registerProfessor({ name, username, password }) {
-    // Vérifier que l'identifiant n'est pas déjà pris
     const taken = professors.some(p => p.username.toLowerCase() === username.trim().toLowerCase())
     if (taken) return { message: 'Cet identifiant est déjà utilisé.' }
-
     const { data, error } = await supabase.from('professors')
       .insert([{ name: name.trim(), username: username.trim(), password, is_owner: false }]).select()
     if (error) return error
     if (data) {
       const prof = data[0]
       setProfessors(p => [...p, prof].sort((a,b) => a.name.localeCompare(b.name)))
-      // Connexion automatique après inscription
       setRole('prof'); setProfId(prof.id); setProfName(prof.name); setIsOwner(false)
       setStudentId(null); setStudentName(null)
       persist({ role: 'prof', profId: prof.id, profName: prof.name, isOwner: false, studentId: null, studentName: null })
@@ -110,43 +114,40 @@ export function AuthProvider({ children }) {
     return null
   }
 
-  // ── Modifier son propre compte (pseudo + mdp) ──────────────────
+  // ── Modifier son propre compte ─────────────────────────────────
   async function updateCurrentProf({ name, username, password }) {
-    // Vérifier que le nouveau username n'est pas pris par quelqu'un d'autre
     const taken = professors.some(p => p.username.toLowerCase() === username.trim().toLowerCase() && p.id !== profId)
     if (taken) return { message: 'Cet identifiant est déjà utilisé par un autre professeur.' }
-
     const fields = { name: name.trim(), username: username.trim() }
     if (password) fields.password = password
-
     const { error } = await supabase.from('professors').update(fields).eq('id', profId)
     if (!error) {
       setProfessors(p => p.map(pr => pr.id === profId ? { ...pr, ...fields } : pr))
       setProfName(name.trim())
-      // Mettre à jour la session
       persist({ role: 'prof', profId, profName: name.trim(), isOwner, studentId, studentName })
     }
     return error ?? null
   }
 
-  // ── Gestion élèves ─────────────────────────────────────────────
+  // ── Gestion élèves (liés au prof courant) ─────────────────────
   async function createStudent({ name, username, password }) {
-    const { data, error } = await supabase.from('students').insert([{ name, username, password }]).select()
-    if (!error && data) setStudents(p => [...p, data[0]].sort((a,b) => a.name.localeCompare(b.name)))
+    const { data, error } = await supabase.from('students')
+      .insert([{ name, username, password, prof_id: profId }]).select()
+    if (!error && data) setAllStudents(p => [...p, data[0]].sort((a,b) => a.name.localeCompare(b.name)))
     return error
   }
   async function updateStudent(id, fields) {
     const { error } = await supabase.from('students').update(fields).eq('id', id)
-    if (!error) setStudents(p => p.map(s => s.id === id ? { ...s, ...fields } : s))
+    if (!error) setAllStudents(p => p.map(s => s.id === id ? { ...s, ...fields } : s))
     return error
   }
   async function deleteStudent(id) {
     const { error } = await supabase.from('students').delete().eq('id', id)
-    if (!error) setStudents(p => p.filter(s => s.id !== id))
+    if (!error) setAllStudents(p => p.filter(s => s.id !== id))
     return error
   }
 
-  // ── Gestion professeurs (owner seulement) ──────────────────────
+  // ── Gestion professeurs (owner seulement) ─────────────────────
   async function createProfessor({ name, username, password }) {
     const { data, error } = await supabase.from('professors')
       .insert([{ name, username, password, is_owner: false }]).select()
@@ -168,7 +169,8 @@ export function AuthProvider({ children }) {
     <AuthContext.Provider value={{
       role, profId, profName, isOwner,
       studentId, studentName,
-      students, professors,
+      students,       // élèves du prof courant uniquement
+      professors,
       authLoading, dbError,
       loginProf, loginStudent,
       selectStudent, backToDashboard, logout,
