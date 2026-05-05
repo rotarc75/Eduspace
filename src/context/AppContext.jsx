@@ -3,9 +3,19 @@ import { supabase } from '../lib/supabase'
 
 const AppContext = createContext(null)
 
+const SUBJECT_COLORS = {
+  blue:   { text: '#7B9CF4', bg: 'rgba(123,156,244,0.12)', border: 'rgba(123,156,244,0.30)' },
+  green:  { text: '#5BC8A0', bg: 'rgba(91,200,160,0.12)',  border: 'rgba(91,200,160,0.30)'  },
+  purple: { text: '#B08CF4', bg: 'rgba(176,140,244,0.12)', border: 'rgba(176,140,244,0.30)' },
+  amber:  { text: '#F4B860', bg: 'rgba(244,184,96,0.12)',  border: 'rgba(244,184,96,0.30)'  },
+  red:    { text: '#F47B7B', bg: 'rgba(244,123,123,0.12)', border: 'rgba(244,123,123,0.30)' },
+}
+export { SUBJECT_COLORS }
+
 export function AppProvider({ children, studentId }) {
   const [resources, setResources] = useState([])
   const [chapters,  setChapters]  = useState([])
+  const [subjects,  setSubjects]  = useState([])
   const [tickets,   setTickets]   = useState([])
   const [comments,  setComments]  = useState([])
   const [journal,   setJournal]   = useState([])
@@ -15,50 +25,67 @@ export function AppProvider({ children, studentId }) {
   const [dbError,   setDbError]   = useState(null)
 
   useEffect(() => {
-    if (studentId) { loadAll() }
+    if (studentId) loadAll()
     else { resetState(); setLoading(false) }
   }, [studentId])
 
   function resetState() {
-    setResources([]); setChapters([]); setTickets([])
-    setComments([]); setJournal([]); setDevoirs([]); setNextSession(null)
+    setResources([]); setChapters([]); setSubjects([])
+    setTickets([]); setComments([]); setJournal([]); setDevoirs([]); setNextSession(null)
   }
 
   async function loadAll() {
     setLoading(true)
     try {
-      const [r, ch, t, cm, j, d, st] = await Promise.all([
+      const [r, ch, sub, t, cm, j, d, st] = await Promise.all([
         supabase.from('resources').select('*').eq('student_id', studentId).order('created_at', { ascending: false }),
         supabase.from('chapters').select('*').eq('student_id', studentId),
+        supabase.from('subjects').select('*').eq('student_id', studentId).order('created_at'),
         supabase.from('tickets').select('*').eq('student_id', studentId).order('created_at', { ascending: false }),
         supabase.from('ticket_comments').select('*').order('created_at'),
         supabase.from('journal').select('*').eq('student_id', studentId).order('date', { ascending: false }),
         supabase.from('devoirs').select('*').eq('student_id', studentId).order('deadline'),
         supabase.from('students').select('next_session').eq('id', studentId).single(),
       ])
-      if (r.error)  throw r.error
-      if (ch.error) throw ch.error
-      if (t.error)  throw t.error
-      if (j.error)  throw j.error
-      if (d.error)  throw d.error
-
-      setResources(r.data  ?? [])
-      setChapters(ch.data  ?? [])
-      setTickets(t.data    ?? [])
-      setComments(cm.data  ?? [])
-      setJournal(j.data    ?? [])
-      setDevoirs(d.data    ?? [])
+      if (r.error)   throw r.error
+      if (ch.error)  throw ch.error
+      if (sub.error) throw sub.error
+      if (t.error)   throw t.error
+      if (j.error)   throw j.error
+      if (d.error)   throw d.error
+      setResources(r.data   ?? [])
+      setChapters(ch.data   ?? [])
+      setSubjects(sub.data  ?? [])
+      setTickets(t.data     ?? [])
+      setComments(cm.data   ?? [])
+      setJournal(j.data     ?? [])
+      setDevoirs(d.data     ?? [])
       if (st.data) setNextSession(st.data.next_session ?? null)
     } catch (err) {
       console.error(err)
-      setDbError('Erreur de chargement. Vérifie ta connexion.')
+      setDbError('Erreur de chargement.')
     }
     setLoading(false)
   }
 
-  // ── Resources ─────────────────────────────────────────────────────
+  // ── Subjects ───────────────────────────────────────────────────
+  async function addSubject({ name, color }) {
+    const { data, error } = await supabase.from('subjects')
+      .insert([{ student_id: studentId, name, color }]).select()
+    if (!error && data) setSubjects(p => [...p, data[0]])
+    return error
+  }
+  async function deleteSubject(id) {
+    await supabase.from('subjects').delete().eq('id', id)
+    setSubjects(p => p.filter(s => s.id !== id))
+    setChapters(p => p.filter(c => c.subject_id !== id))
+    setResources(p => p.filter(r => r.subject_id !== id))
+  }
+
+  // ── Resources ──────────────────────────────────────────────────
   async function addResource(resource) {
-    const { data, error } = await supabase.from('resources').insert([{ ...resource, student_id: studentId }]).select()
+    const { data, error } = await supabase.from('resources')
+      .insert([{ ...resource, student_id: studentId }]).select()
     if (!error && data) setResources(p => [data[0], ...p])
     return error
   }
@@ -67,9 +94,10 @@ export function AppProvider({ children, studentId }) {
     setResources(p => p.filter(r => r.id !== id))
   }
 
-  // ── Chapters ──────────────────────────────────────────────────────
+  // ── Chapters ───────────────────────────────────────────────────
   async function addChapter(chapter) {
-    const { data, error } = await supabase.from('chapters').insert([{ ...chapter, student_id: studentId }]).select()
+    const { data, error } = await supabase.from('chapters')
+      .insert([{ ...chapter, student_id: studentId }]).select()
     if (!error && data) setChapters(p => [...p, data[0]])
     return error
   }
@@ -78,9 +106,10 @@ export function AppProvider({ children, studentId }) {
     setChapters(p => p.filter(c => c.id !== id))
   }
 
-  // ── Tickets ───────────────────────────────────────────────────────
+  // ── Tickets ────────────────────────────────────────────────────
   async function addTicket(ticket) {
-    const { data, error } = await supabase.from('tickets').insert([{ ...ticket, student_id: studentId }]).select()
+    const { data, error } = await supabase.from('tickets')
+      .insert([{ ...ticket, student_id: studentId }]).select()
     if (!error && data) setTickets(p => [data[0], ...p])
     return error
   }
@@ -105,9 +134,10 @@ export function AppProvider({ children, studentId }) {
     return comments.filter(c => c.ticket_id === ticketId)
   }
 
-  // ── Journal ───────────────────────────────────────────────────────
+  // ── Journal ────────────────────────────────────────────────────
   async function addJournalEntry(entry) {
-    const { data, error } = await supabase.from('journal').insert([{ ...entry, student_id: studentId }]).select()
+    const { data, error } = await supabase.from('journal')
+      .insert([{ ...entry, student_id: studentId }]).select()
     if (!error && data) setJournal(p => [data[0], ...p])
     return error
   }
@@ -122,10 +152,11 @@ export function AppProvider({ children, studentId }) {
     setDevoirs(p => p.map(d => d.journal_id === id ? { ...d, journal_id: null } : d))
   }
 
-  // ── Devoirs ───────────────────────────────────────────────────────
+  // ── Devoirs ────────────────────────────────────────────────────
   const sortDevoirs = arr => [...arr].sort((a, b) => new Date(a.deadline) - new Date(b.deadline))
   async function addDevoir(devoir) {
-    const { data, error } = await supabase.from('devoirs').insert([{ ...devoir, student_id: studentId }]).select()
+    const { data, error } = await supabase.from('devoirs')
+      .insert([{ ...devoir, student_id: studentId }]).select()
     if (!error && data) setDevoirs(p => sortDevoirs([...p, data[0]]))
     return error
   }
@@ -144,8 +175,14 @@ export function AppProvider({ children, studentId }) {
     await supabase.from('devoirs').delete().eq('id', id)
     setDevoirs(p => p.filter(d => d.id !== id))
   }
+  async function submitDevoir(id, { url, name }) {
+    const fields = { submission_url: url, submission_name: name, submitted_at: new Date().toISOString(), done: true }
+    const { data, error } = await supabase.from('devoirs').update(fields).eq('id', id).select()
+    if (!error && data) setDevoirs(p => p.map(d => d.id === id ? data[0] : d))
+    return error
+  }
 
-  // ── Prochaine séance ──────────────────────────────────────────────
+  // ── Next session ───────────────────────────────────────────────
   async function saveNextSession(date) {
     const { error } = await supabase.from('students')
       .update({ next_session: date || null }).eq('id', studentId)
@@ -155,13 +192,14 @@ export function AppProvider({ children, studentId }) {
 
   return (
     <AppContext.Provider value={{
-      resources, chapters, tickets, journal, devoirs, nextSession,
+      resources, chapters, subjects, tickets, journal, devoirs, nextSession,
       loading, dbError,
+      addSubject, deleteSubject,
       addResource, deleteResource,
       addChapter, deleteChapter,
       addTicket, toggleTicket, deleteTicket, addComment, ticketComments,
       addJournalEntry, updateJournalEntry, deleteJournalEntry,
-      addDevoir, updateDevoir, toggleDevoir, deleteDevoir,
+      addDevoir, updateDevoir, toggleDevoir, deleteDevoir, submitDevoir,
       saveNextSession,
     }}>
       {children}

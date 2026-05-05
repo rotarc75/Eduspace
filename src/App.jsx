@@ -4,22 +4,75 @@ import { AppProvider, useApp } from './context/AppContext'
 import Sidebar from './shared/Sidebar'
 import Modal from './shared/Modal'
 import ErrorBoundary from './shared/ErrorBoundary'
-import LoginScreen    from './views/LoginScreen'
-import ProfDashboard  from './views/ProfDashboard'
-import Accueil        from './views/Accueil'
-import MatiereView    from './views/MatiereView'
-import Devoirs        from './views/Devoirs'
-import Tickets        from './views/Tickets'
-import Journal        from './views/Journal'
-import Settings       from './views/Settings'
+import Icon from './shared/Icon'
+import LoginScreen   from './views/LoginScreen'
+import ProfDashboard from './views/ProfDashboard'
+import Accueil       from './views/Accueil'
+import MatiereView   from './views/MatiereView'
+import Devoirs       from './views/Devoirs'
+import Tickets       from './views/Tickets'
+import Journal       from './views/Journal'
+import Settings      from './views/Settings'
 
-// ── Workspace (espace d'un élève) ────────────────────────────────
+const COLORS = ['blue', 'green', 'purple', 'amber', 'red']
+const COLOR_LABELS = { blue: 'Bleu', green: 'Vert', purple: 'Violet', amber: 'Orange', red: 'Rouge' }
+const SUBJECT_COLOR_MAP = {
+  blue:   '#7B9CF4', green: '#5BC8A0', purple: '#B08CF4', amber: '#F4B860', red: '#F47B7B',
+}
+
+function AddSubjectModal({ open, onClose }) {
+  const { addSubject } = useApp()
+  const [name,   setName]   = useState('')
+  const [color,  setColor]  = useState('blue')
+  const [saving, setSaving] = useState(false)
+  async function handleAdd() {
+    if (!name.trim() || saving) return
+    setSaving(true)
+    await addSubject({ name: name.trim(), color })
+    setSaving(false)
+    setName(''); setColor('blue')
+    onClose()
+  }
+  return (
+    <Modal open={open} onClose={onClose} title="Nouvelle matière" size="sm">
+      <div className="form-stack">
+        <div className="form-group">
+          <label className="form-label">Nom de la matière *</label>
+          <input placeholder="Ex : Physique, Anglais, Histoire…" value={name}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleAdd()}
+            autoFocus />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Couleur</label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {COLORS.map(c => (
+              <button key={c} type="button"
+                onClick={() => setColor(c)}
+                style={{
+                  width: 32, height: 32, borderRadius: '50%', border: `3px solid ${color === c ? SUBJECT_COLOR_MAP[c] : 'transparent'}`,
+                  background: SUBJECT_COLOR_MAP[c], padding: 0, opacity: color === c ? 1 : 0.45,
+                  transition: 'opacity 0.15s, border-color 0.15s',
+                }}
+                title={COLOR_LABELS[c]}
+              />
+            ))}
+          </div>
+        </div>
+        <button className="btn-primary btn-full" onClick={handleAdd} disabled={!name.trim() || saving}>
+          <Icon name="plus" size={14} /> {saving ? 'Création…' : 'Créer la matière'}
+        </button>
+      </div>
+    </Modal>
+  )
+}
+
 function Workspace({ isProf }) {
-  const { tickets, devoirs, nextSession, loading, dbError } = useApp()
-  const { studentName, backToDashboard, role, logout } = useAuth()
+  const { tickets, devoirs, subjects, nextSession, loading, dbError, deleteSubject } = useApp()
+  const { studentName, backToDashboard, logout } = useAuth()
 
   const [tab,             setTab]             = useState('accueil')
-  const [showAuth,        setShowAuth]        = useState(false)
+  const [showAddSubject,  setShowAddSubject]  = useState(false)
   const [highlightDevoir, setHighlightDevoir] = useState(null)
 
   const openTickets    = (tickets ?? []).filter(t => t.statut === 'ouvert').length
@@ -27,19 +80,20 @@ function Workspace({ isProf }) {
     d => !d.done && d.deadline && new Date(d.deadline) >= new Date(new Date().toDateString())
   ).length
 
-  function gotoDevoir(id) {
-    setHighlightDevoir(id)
-    setTab('devoirs')
-  }
+  function gotoDevoir(id) { setHighlightDevoir(id); setTab('devoirs') }
 
   if (loading) return <div className="loading-screen"><div className="loading-spinner" /><p>Chargement…</p></div>
   if (dbError)  return <div className="loading-screen"><p className="db-error">⚠️ {dbError}</p></div>
 
+  // Trouver la matière active si tab = subject_xxx
+  const activeSubject = tab.startsWith('subject_')
+    ? (subjects ?? []).find(s => s.id === tab.replace('subject_', ''))
+    : null
+
   function renderView() {
-    const wrap = node => <ErrorBoundary key={tab}>{node}</ErrorBoundary>
+    const wrap = (node, key) => <ErrorBoundary key={key ?? tab}>{node}</ErrorBoundary>
+    if (activeSubject) return wrap(<MatiereView subject={activeSubject} isProf={isProf} />, activeSubject.id)
     switch (tab) {
-      case 'maths':    return wrap(<MatiereView matiere="maths" isProf={isProf} />)
-      case 'infos':    return wrap(<MatiereView matiere="infos" isProf={isProf} />)
       case 'devoirs':  return wrap(<Devoirs isProf={isProf} highlightId={highlightDevoir} onHighlightDone={() => setHighlightDevoir(null)} />)
       case 'tickets':  return wrap(<Tickets isProf={isProf} />)
       case 'journal':  return wrap(<Journal isProf={isProf} onGotoDevoir={gotoDevoir} />)
@@ -54,68 +108,30 @@ function Workspace({ isProf }) {
         tab={tab} setTab={setTab}
         isProf={isProf}
         studentName={studentName}
+        subjects={subjects}
         openTickets={openTickets}
         pendingDevoirs={pendingDevoirs}
         nextSession={nextSession}
-        onAuthRequest={() => setShowAuth(true)}
-        onBackToDashboard={role === 'prof' ? backToDashboard : null}
+        onAddSubject={() => setShowAddSubject(true)}
+        onBackToDashboard={backToDashboard}
         onLogout={logout}
       />
       <main className="main-content">{renderView()}</main>
-
-      <Modal open={showAuth} onClose={() => setShowAuth(false)} title="Accès professeur" size="sm">
-        <ProfLoginInline onClose={() => setShowAuth(false)} />
-      </Modal>
+      <AddSubjectModal open={showAddSubject} onClose={() => setShowAddSubject(false)} />
     </div>
   )
 }
 
-function ProfLoginInline({ onClose }) {
-  const { loginProf } = useAuth()
-  const [pwd, setPwd] = useState('')
-  const [err, setErr] = useState(false)
-  function submit() {
-    const ok = loginProf(pwd)
-    if (ok) onClose()
-    else setErr(true)
-  }
-  return (
-    <div className="form-stack">
-      <div className="form-group">
-        <label className="form-label">Mot de passe professeur</label>
-        <input type="password" placeholder="••••••••" value={pwd} className={err ? 'error' : ''}
-          onChange={e => { setPwd(e.target.value); setErr(false) }}
-          onKeyDown={e => e.key === 'Enter' && submit()} autoFocus />
-        {err && <span className="form-error">Mot de passe incorrect</span>}
-      </div>
-      <div className="btn-row">
-        <button className="btn-primary btn-full" onClick={submit}>Connexion</button>
-        <button onClick={onClose}>Annuler</button>
-      </div>
-      <p className="form-hint">Par défaut : <strong>prof2024</strong></p>
-    </div>
-  )
-}
-
-// ── Routeur principal ────────────────────────────────────────────
 function AppRouter() {
   const { role, studentId, authLoading, dbError } = useAuth()
-
   if (authLoading) return <div className="loading-screen"><div className="loading-spinner" /><p>Chargement…</p></div>
-  if (dbError)     return <div className="loading-screen"><p className="db-error">⚠️ {dbError}</p><p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 8 }}>Vérifie ton fichier <code>.env</code>.</p></div>
-
-  // Pas connecté
-  if (!role) return <LoginScreen />
-
-  // Prof sans élève sélectionné → tableau de bord
+  if (dbError)     return <div className="loading-screen"><p className="db-error">⚠️ {dbError}</p></div>
+  if (!role)       return <LoginScreen />
   if (role === 'prof' && !studentId) return <ProfDashboard />
-
-  // Prof dans l'espace d'un élève, ou élève connecté
-  const isProf = role === 'prof'
   return (
     <ErrorBoundary>
       <AppProvider studentId={studentId}>
-        <Workspace isProf={isProf} />
+        <Workspace isProf={role === 'prof'} />
       </AppProvider>
     </ErrorBoundary>
   )
