@@ -4,110 +4,57 @@ import { supabase } from '../lib/supabase'
 import Icon from '../shared/Icon'
 import Modal from '../shared/Modal'
 
-const fmtDate  = d => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : null
+const fmt      = d => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }) : null
 const fmtShort = d => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null
-const COLORS   = [
+const fmtNext  = d => {
+  if (!d) return null
+  const days = Math.ceil((new Date(d) - new Date()) / 864e5)
+  const date = fmtShort(d)
+  if (days === 0) return { label: date, sub: "Aujourd'hui !", color: 'var(--green)' }
+  if (days === 1) return { label: date, sub: 'Demain', color: 'var(--maths)' }
+  if (days > 0)   return { label: date, sub: `J-${days}`, color: 'var(--maths)' }
+  return { label: date, sub: 'Passée', color: 'var(--text-hint)' }
+}
+
+const PALETTE = [
   { bg: 'var(--maths-bg)',  border: 'var(--maths-border)',  text: 'var(--maths)'  },
   { bg: 'var(--infos-bg)',  border: 'var(--infos-border)',  text: 'var(--infos)'  },
   { bg: 'var(--amber-bg)',  border: 'var(--amber-border)',  text: 'var(--amber)'  },
   { bg: 'var(--purple-bg)', border: 'var(--purple-border)', text: 'var(--purple)' },
   { bg: 'var(--green-bg)',  border: 'var(--green-border)',  text: 'var(--green)'  },
 ]
+
 const initials = n => n?.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2) ?? '?'
 
-function StudentCard({ student, color, stat, onSelect, onEdit, onDelete }) {
-  return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ padding: '1.125rem 1.25rem 0.875rem', background: color.bg, borderBottom: `1px solid ${color.border}`, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: color.text, flexShrink: 0 }}>
-          {initials(student.name)}
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 15, fontWeight: 600 }}>{student.name}</div>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{student.username}</div>
-        </div>
-      </div>
-      <div style={{ padding: '0.875rem 1.25rem' }}>
-        <div style={{ display: 'flex', gap: '1.25rem', marginBottom: 10, flexWrap: 'wrap' }}>
-          {[
-            { val: stat?.devoirsPending, label: 'devoir(s)' },
-            { val: stat?.ticketsOpen,    label: 'ticket(s)' },
-            { val: stat?.totalSessions,  label: 'séance(s)' },
-          ].map(({ val, label }) => (
-            <div key={label} style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{val ?? '—'}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>{label}</div>
-            </div>
-          ))}
-        </div>
-        {stat?.lastSession && <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="pen" size={11} /> Dernière séance : {fmtDate(stat.lastSession)}</div>}
-        {student.next_session && <div style={{ fontSize: 12, color: 'var(--maths)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="calendar" size={11} /> Prochaine : {fmtShort(student.next_session)}</div>}
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button className="btn-primary" style={{ flex: 1, justifyContent: 'center', fontSize: 13 }} onClick={onSelect}>
-            Accéder <Icon name="chevron-right" size={13} />
-          </button>
-          <button className="btn-icon" style={{ padding: 7 }} onClick={onEdit} title="Modifier"><Icon name="pen" size={14} /></button>
-          <button className="btn-icon btn-danger" style={{ padding: 7 }} onClick={onDelete} title="Supprimer"><Icon name="trash" size={14} /></button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function StudentForm({ initial, onSave, saving, error }) {
-  const [form, setForm] = useState(initial)
+// ── Formulaire générique (élève ou prof) ─────────────────────────
+function AccountForm({ fields, onSave, saving, error, isEdit }) {
+  const [form, setForm] = useState(fields)
+  useEffect(() => setForm(fields), [JSON.stringify(fields)])
   return (
     <div className="form-stack">
-      <div className="form-group">
-        <label className="form-label">Nom complet *</label>
-        <input placeholder="Ex : Marie Dupont" value={form.name} autoFocus
-          onChange={e => setForm({ ...form, name: e.target.value })} />
-      </div>
-      <div className="form-group">
-        <label className="form-label">Identifiant de connexion *</label>
-        <input placeholder="Ex : marie.dupont" value={form.username}
-          onChange={e => setForm({ ...form, username: e.target.value })} />
-        <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>L'élève l'utilise pour se connecter.</div>
-      </div>
-      <div className="form-group">
-        <label className="form-label">Mot de passe *</label>
-        <input type="password" placeholder="••••••••" value={form.password}
-          onChange={e => setForm({ ...form, password: e.target.value })}
-          onKeyDown={e => e.key === 'Enter' && onSave(form)} />
-        {initial.password === '' && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Laisser vide pour ne pas changer.</div>}
-      </div>
-      {error && <div style={{ fontSize: 12, color: 'var(--red)' }}><Icon name="alert" size={12} /> {error}</div>}
-      <button className="btn-primary btn-full" onClick={() => onSave(form)} disabled={!form.name.trim() || !form.username.trim() || saving}>
-        {saving ? 'Enregistrement…' : initial._isEdit ? 'Mettre à jour' : 'Créer le compte'}
-      </button>
-    </div>
-  )
-}
-
-function ProfForm({ initial, onSave, saving, error }) {
-  const [form, setForm] = useState(initial)
-  return (
-    <div className="form-stack">
-      <div className="form-group">
-        <label className="form-label">Nom *</label>
-        <input placeholder="Ex : Dr. Martin" value={form.name} autoFocus
-          onChange={e => setForm({ ...form, name: e.target.value })} />
-      </div>
+      {form.name !== undefined && (
+        <div className="form-group">
+          <label className="form-label">Nom complet *</label>
+          <input value={form.name} autoFocus placeholder="Ex : Marie Dupont"
+            onChange={e => setForm({ ...form, name: e.target.value })} />
+        </div>
+      )}
       <div className="form-group">
         <label className="form-label">Identifiant *</label>
-        <input placeholder="Ex : martin" value={form.username}
+        <input value={form.username} placeholder="Ex : marie.dupont"
           onChange={e => setForm({ ...form, username: e.target.value })} />
+        {!isEdit && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Utilisé pour se connecter.</div>}
       </div>
       <div className="form-group">
-        <label className="form-label">Mot de passe {initial._isEdit ? '(laisser vide = inchangé)' : '*'}</label>
+        <label className="form-label">Mot de passe {isEdit ? '(vide = inchangé)' : '*'}</label>
         <input type="password" placeholder="••••••••" value={form.password}
           onChange={e => setForm({ ...form, password: e.target.value })}
           onKeyDown={e => e.key === 'Enter' && onSave(form)} />
       </div>
-      {error && <div style={{ fontSize: 12, color: 'var(--red)' }}><Icon name="alert" size={12} /> {error}</div>}
-      <button className="btn-primary btn-full" onClick={() => onSave(form)}
-        disabled={!form.name.trim() || !form.username.trim() || (!initial._isEdit && !form.password) || saving}>
-        {saving ? 'Enregistrement…' : initial._isEdit ? 'Mettre à jour' : 'Créer le compte'}
+      {error && <div style={{ fontSize: 12, color: 'var(--red)', display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="alert" size={12} />{error}</div>}
+      <button className="btn-primary btn-full" disabled={saving || !form.username?.trim() || (!isEdit && !form.password)}
+        onClick={() => onSave(form)}>
+        {saving ? 'Enregistrement…' : isEdit ? 'Mettre à jour' : 'Créer le compte'}
       </button>
     </div>
   )
@@ -118,100 +65,79 @@ export default function ProfDashboard() {
           createStudent, updateStudent, deleteStudent,
           createProfessor, updateProfessor, deleteProfessor } = useAuth()
 
-  const [stats,      setStats]      = useState({})
-  const [activeTab,  setActiveTab]  = useState('students')  // 'students' | 'professors'
-  const [modal,      setModal]      = useState(null)  // { type, data? }
-  const [saving,     setSaving]     = useState(false)
-  const [formErr,    setFormErr]    = useState(null)
-  const [delConfirm, setDelConfirm] = useState(null)
+  const [stats,     setStats]     = useState({})
+  const [activeTab, setActiveTab] = useState('students')
+  const [modal,     setModal]     = useState(null)
+  const [saving,    setSaving]    = useState(false)
+  const [formErr,   setFormErr]   = useState(null)
+  const [delId,     setDelId]     = useState(null)
 
   useEffect(() => { if (students.length) loadStats() }, [students])
 
   async function loadStats() {
     const ids = students.map(s => s.id)
+    if (!ids.length) return
     const [devs, ticks, jours] = await Promise.all([
-      supabase.from('devoirs').select('student_id, done').in('student_id', ids),
-      supabase.from('tickets').select('student_id, statut').in('student_id', ids),
-      supabase.from('journal').select('student_id, date').in('student_id', ids).order('date', { ascending: false }),
+      supabase.from('devoirs').select('student_id,done').in('student_id', ids),
+      supabase.from('tickets').select('student_id,statut').in('student_id', ids),
+      supabase.from('journal').select('student_id,date').in('student_id', ids).order('date', { ascending: false }),
     ])
     const s = {}
     ids.forEach(id => {
-      const devs_   = (devs.data  ?? []).filter(d => d.student_id === id)
-      const ticks_  = (ticks.data ?? []).filter(t => t.student_id === id)
-      const jours_  = (jours.data ?? []).filter(j => j.student_id === id)
-      s[id] = { devoirsPending: devs_.filter(d => !d.done).length, ticketsOpen: ticks_.filter(t => t.statut === 'ouvert').length, lastSession: jours_[0]?.date ?? null, totalSessions: jours_.length }
+      s[id] = {
+        devoirsPending: (devs.data ?? []).filter(d => d.student_id === id && !d.done).length,
+        ticketsOpen:    (ticks.data ?? []).filter(t => t.student_id === id && t.statut === 'ouvert').length,
+        lastSession:    (jours.data ?? []).find(j => j.student_id === id)?.date ?? null,
+        totalSessions:  (jours.data ?? []).filter(j => j.student_id === id).length,
+      }
     })
     setStats(s)
   }
 
-  async function handleCreateStudent(form) {
-    if (!form.name.trim() || !form.username.trim() || !form.password) { setFormErr('Tous les champs sont requis.'); return }
+  // ── CRUD handlers ────────────────────────────────────────────────
+  async function handle(action, form) {
+    const { name, username, password } = form
+    if (!username?.trim() || (!modal?.isEdit && !password)) { setFormErr('Champs obligatoires manquants.'); return }
     setSaving(true)
-    const err = await createStudent(form)
+    const fields = { username: username.trim(), ...(name ? { name: name.trim() } : {}), ...(password ? { password } : {}) }
+    const err = await action(fields)
     setSaving(false)
     if (err) { setFormErr(err.message); return }
     setModal(null); setFormErr(null)
   }
 
-  async function handleEditStudent(form) {
-    const fields = { name: form.name.trim(), username: form.username.trim() }
-    if (form.password.trim()) fields.password = form.password.trim()
-    setSaving(true)
-    const err = await updateStudent(modal.data.id, fields)
-    setSaving(false)
-    if (err) { setFormErr(err.message); return }
-    setModal(null); setFormErr(null)
+  async function handleDelete() {
+    if (!delId) return
+    if (delId.type === 'student') await deleteStudent(delId.id)
+    else await deleteProfessor(delId.id)
+    setDelId(null)
   }
 
-  async function handleDeleteStudent() {
-    await deleteStudent(delConfirm.id)
-    setDelConfirm(null)
-  }
-
-  async function handleCreateProf(form) {
-    if (!form.name.trim() || !form.username.trim() || !form.password) { setFormErr('Tous les champs sont requis.'); return }
-    setSaving(true)
-    const err = await createProfessor(form)
-    setSaving(false)
-    if (err) { setFormErr(err.message); return }
-    setModal(null); setFormErr(null)
-  }
-
-  async function handleEditProf(form) {
-    const fields = { name: form.name.trim(), username: form.username.trim() }
-    if (form.password.trim()) fields.password = form.password.trim()
-    setSaving(true)
-    const err = await updateProfessor(modal.data.id, fields)
-    setSaving(false)
-    if (err) { setFormErr(err.message); return }
-    setModal(null); setFormErr(null)
-  }
-
-  async function handleDeleteProf() {
-    await deleteProfessor(delConfirm.id)
-    setDelConfirm(null)
-  }
+  // ── Global stats ─────────────────────────────────────────────────
+  const totalDevoirs  = Object.values(stats).reduce((s, v) => s + (v.devoirsPending ?? 0), 0)
+  const totalTickets  = Object.values(stats).reduce((s, v) => s + (v.ticketsOpen    ?? 0), 0)
+  const totalSessions = Object.values(stats).reduce((s, v) => s + (v.totalSessions  ?? 0), 0)
+  const nextSessions  = students.filter(s => s.next_session).sort((a,b) => new Date(a.next_session) - new Date(b.next_session))
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-page)' }}>
-      {/* Header */}
+
+      {/* ── Header ──────────────────────────────────────────────── */}
       <div style={{ background: 'var(--bg-sidebar)', borderBottom: '1px solid var(--border)', padding: '1rem 2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--maths-bg)', border: '1px solid var(--maths-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="book" size={16} style={{ color: 'var(--maths)' }} />
           </div>
           <span style={{ fontWeight: 700, fontSize: 15 }}>EduSpace</span>
-          <span style={{ color: 'var(--text-hint)', fontSize: 13, marginLeft: 4 }}>
-            — {profName}
-            {isOwner && <span style={{ marginLeft: 6, fontSize: 11, background: 'var(--amber-bg)', color: 'var(--amber)', border: '1px solid var(--amber-border)', borderRadius: 20, padding: '1px 7px' }}>Propriétaire</span>}
-          </span>
+          <span style={{ color: 'var(--text-hint)', fontSize: 13 }}>· {profName}</span>
+          {isOwner && <span className="badge badge-amber">Admin</span>}
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn-primary" onClick={() => { setModal({ type: 'createStudent' }); setFormErr(null) }}>
+          <button className="btn-primary" onClick={() => { setModal({ type: 'student' }); setFormErr(null) }}>
             <Icon name="plus" size={14} /> Nouvel élève
           </button>
           {isOwner && (
-            <button onClick={() => { setModal({ type: 'createProf' }); setFormErr(null) }}>
+            <button onClick={() => { setModal({ type: 'prof' }); setFormErr(null) }}>
               <Icon name="plus" size={14} /> Nouveau prof
             </button>
           )}
@@ -221,13 +147,65 @@ export default function ProfDashboard() {
         </div>
       </div>
 
-      <div style={{ padding: '2rem', maxWidth: 1000, margin: '0 auto' }}>
+      <div style={{ padding: '2rem', maxWidth: 1040, margin: '0 auto' }}>
 
-        {/* Tabs */}
+        {/* ── Bannière de bienvenue ────────────────────────────── */}
+        <div style={{ background: 'linear-gradient(135deg, var(--maths-bg) 0%, var(--bg-elevated) 100%)', border: '1px solid var(--maths-border)', borderRadius: 'var(--r-xl)', padding: '1.5rem 2rem', marginBottom: '1.75rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1.5rem', flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--maths)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>Tableau de bord</div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, letterSpacing: '-0.3px', marginBottom: 4 }}>
+              Bonjour, {profName?.split(' ')[0]} 👋
+            </h1>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              {students.length} élève{students.length !== 1 ? 's' : ''} · {professors.length} professeur{professors.length !== 1 ? 's' : ''}
+            </p>
+          </div>
+          {/* Prochaines séances */}
+          {nextSessions.length > 0 && (
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {nextSessions.slice(0, 3).map(s => {
+                const ns = fmtNext(s.next_session)
+                return (
+                  <div key={s.id} onClick={() => selectStudent(s)}
+                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-md)', borderRadius: 'var(--r-lg)', padding: '0.625rem 1rem', cursor: 'pointer', transition: 'border-color 0.15s', minWidth: 130 }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--maths)'}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border-md)'}
+                  >
+                    <div style={{ fontSize: 11, color: 'var(--text-hint)', marginBottom: 2 }}>Prochaine séance</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: ns?.color }}>{ns?.label}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{s.name}</div>
+                    <div style={{ fontSize: 11, color: ns?.color, marginTop: 1 }}>{ns?.sub}</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ── Stat bar ────────────────────────────────────────── */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: '1.75rem' }}>
+          {[
+            { icon: 'check-circle', label: 'Devoirs en attente', value: totalDevoirs,  color: totalDevoirs  > 0 ? 'var(--amber)' : 'var(--text)' },
+            { icon: 'ticket',       label: 'Tickets ouverts',    value: totalTickets,  color: totalTickets  > 0 ? 'var(--amber)' : 'var(--text)' },
+            { icon: 'pen',          label: 'Séances au total',   value: totalSessions, color: 'var(--text)' },
+          ].map(({ icon, label, value, color }) => (
+            <div key={label} className="card" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 'var(--r)', background: 'var(--bg-elevated)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Icon name={icon} size={18} style={{ color: 'var(--maths)' }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 24, fontWeight: 700, color, letterSpacing: '-1px', lineHeight: 1 }}>{value}</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Tabs ────────────────────────────────────────────── */}
         {isOwner && (
-          <div className="ticket-filters" style={{ marginBottom: '1.5rem' }}>
+          <div className="ticket-filters" style={{ marginBottom: '1.25rem' }}>
             <button className={`filter-btn ${activeTab === 'students' ? 'active' : ''}`} onClick={() => setActiveTab('students')}>
-              Mes élèves ({students.length})
+              Élèves ({students.length})
             </button>
             <button className={`filter-btn ${activeTab === 'professors' ? 'active' : ''}`} onClick={() => setActiveTab('professors')}>
               Professeurs ({professors.length})
@@ -235,65 +213,117 @@ export default function ProfDashboard() {
           </div>
         )}
 
-        {/* ── Élèves ─────────────────────────────────────────────── */}
+        {/* ── Grille élèves ────────────────────────────────────── */}
         {activeTab === 'students' && (
           <>
-            <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>Mes élèves</h1>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.75rem' }}>
-              {students.length} élève{students.length !== 1 ? 's' : ''} · Clique sur un élève pour accéder à son espace
-            </p>
             {students.length === 0 ? (
               <div className="empty-state card" style={{ padding: '4rem 2rem' }}>
                 <Icon name="user" size={40} />
                 <h2 style={{ color: 'var(--text-muted)', marginTop: 8 }}>Aucun élève pour l'instant</h2>
-                <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => { setModal({ type: 'createStudent' }); setFormErr(null) }}>
+                <p style={{ fontSize: 13 }}>Commence par créer un premier compte élève</p>
+                <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => { setModal({ type: 'student' }); setFormErr(null) }}>
                   <Icon name="plus" size={14} /> Créer un élève
                 </button>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
-                {students.map((student, i) => (
-                  <StudentCard key={student.id}
-                    student={student}
-                    color={COLORS[i % COLORS.length]}
-                    stat={stats[student.id]}
-                    onSelect={() => selectStudent(student)}
-                    onEdit={() => { setModal({ type: 'editStudent', data: student }); setFormErr(null) }}
-                    onDelete={() => setDelConfirm({ type: 'student', ...student })}
-                  />
-                ))}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: 16 }}>
+                {students.map((student, i) => {
+                  const col  = PALETTE[i % PALETTE.length]
+                  const stat = stats[student.id] ?? {}
+                  const ns   = fmtNext(student.next_session)
+                  return (
+                    <div key={student.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
+                      {/* Top coloré */}
+                      <div style={{ background: col.bg, borderBottom: `1px solid ${col.border}`, padding: '1.125rem 1.25rem', display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <div style={{ width: 44, height: 44, borderRadius: '50%', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, color: col.text, flexShrink: 0 }}>
+                          {initials(student.name)}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{student.name}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{student.username}</div>
+                        </div>
+                      </div>
+
+                      <div style={{ padding: '0.875rem 1.25rem' }}>
+                        {/* Mini stats */}
+                        <div style={{ display: 'flex', gap: '1.25rem', marginBottom: 12 }}>
+                          {[
+                            { n: stat.devoirsPending, label: 'devoir(s)', warn: stat.devoirsPending > 0 },
+                            { n: stat.ticketsOpen,    label: 'ticket(s)', warn: stat.ticketsOpen > 0 },
+                            { n: stat.totalSessions,  label: 'séance(s)', warn: false },
+                          ].map(({ n, label, warn }) => (
+                            <div key={label}>
+                              <div style={{ fontSize: 20, fontWeight: 700, color: warn ? 'var(--amber)' : 'var(--text)', lineHeight: 1 }}>{n ?? '—'}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 1 }}>{label}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Prochaine séance */}
+                        {ns ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10, padding: '5px 8px', background: 'var(--bg-elevated)', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
+                            <Icon name="calendar" size={12} style={{ color: ns.color, flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, color: ns.color, fontWeight: 500 }}>{ns.label}</span>
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>· {ns.sub}</span>
+                          </div>
+                        ) : stat.lastSession ? (
+                          <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
+                            <Icon name="pen" size={11} /> Dernière séance : {fmtShort(stat.lastSession)}
+                          </div>
+                        ) : null}
+
+                        {/* Actions */}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button className="btn-primary" style={{ flex: 1, justifyContent: 'center', fontSize: 13 }}
+                            onClick={() => selectStudent(student)}>
+                            Accéder <Icon name="chevron-right" size={13} />
+                          </button>
+                          <button className="btn-icon" style={{ padding: 7 }} title="Modifier"
+                            onClick={() => { setModal({ type: 'student', isEdit: true, data: student }); setFormErr(null) }}>
+                            <Icon name="pen" size={14} />
+                          </button>
+                          <button className="btn-icon btn-danger" style={{ padding: 7 }} title="Supprimer"
+                            onClick={() => setDelId({ type: 'student', id: student.id, name: student.name })}>
+                            <Icon name="trash" size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </>
         )}
 
-        {/* ── Professeurs (owner only) ────────────────────────────── */}
+        {/* ── Liste professeurs ────────────────────────────────── */}
         {activeTab === 'professors' && isOwner && (
           <>
-            <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>Comptes professeurs</h1>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.75rem' }}>
-              Les professeurs ont accès à tous les élèves. Seul le propriétaire peut gérer les comptes professeurs.
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              Les professeurs ont accès à tous les élèves. Seul l'admin peut gérer les comptes professeurs.
             </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {professors.map(prof => (
                 <div key={prof.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                   <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--maths-bg)', border: '1px solid var(--maths-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: 'var(--maths)', flexShrink: 0 }}>
                     {initials(prof.name)}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 14, fontWeight: 500 }}>{prof.name}</span>
-                      {prof.is_owner && <span style={{ fontSize: 11, background: 'var(--amber-bg)', color: 'var(--amber)', border: '1px solid var(--amber-border)', borderRadius: 20, padding: '1px 7px' }}>Propriétaire</span>}
-                      {prof.id === profId && <span style={{ fontSize: 11, background: 'var(--green-bg)', color: 'var(--green)', border: '1px solid var(--green-border)', borderRadius: 20, padding: '1px 7px' }}>Vous</span>}
+                      {prof.is_owner && <span className="badge badge-amber">Admin</span>}
+                      {prof.id === profId && <span className="badge badge-green">Vous</span>}
                     </div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{prof.username}</div>
                   </div>
                   {!prof.is_owner && (
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                      <button className="btn-icon" onClick={() => { setModal({ type: 'editProf', data: prof }); setFormErr(null) }} title="Modifier">
+                      <button className="btn-icon" style={{ padding: 7 }} title="Modifier"
+                        onClick={() => { setModal({ type: 'prof', isEdit: true, data: prof }); setFormErr(null) }}>
                         <Icon name="pen" size={14} />
                       </button>
-                      <button className="btn-icon btn-danger" onClick={() => setDelConfirm({ type: 'prof', ...prof })} title="Supprimer">
+                      <button className="btn-icon btn-danger" style={{ padding: 7 }} title="Supprimer"
+                        onClick={() => setDelId({ type: 'prof', id: prof.id, name: prof.name })}>
                         <Icon name="trash" size={14} />
                       </button>
                     </div>
@@ -306,48 +336,70 @@ export default function ProfDashboard() {
       </div>
 
       {/* ── Modals ─────────────────────────────────────────────────── */}
-      <Modal open={modal?.type === 'createStudent'} onClose={() => setModal(null)} title="Créer un compte élève" size="sm">
-        <StudentForm initial={{ name: '', username: '', password: '', _isEdit: false }}
-          onSave={handleCreateStudent} saving={saving} error={formErr} />
+      <Modal
+        open={!!modal && modal.type === 'student'}
+        onClose={() => { setModal(null); setFormErr(null) }}
+        title={modal?.isEdit ? `Modifier — ${modal?.data?.name}` : 'Créer un compte élève'}
+        size="sm"
+      >
+        <AccountForm
+          fields={modal?.isEdit
+            ? { name: modal.data.name, username: modal.data.username, password: '' }
+            : { name: '', username: '', password: '' }
+          }
+          isEdit={modal?.isEdit}
+          saving={saving}
+          error={formErr}
+          onSave={form => handle(
+            modal?.isEdit
+              ? fields => updateStudent(modal.data.id, fields)
+              : createStudent,
+            form
+          )}
+        />
       </Modal>
 
-      <Modal open={modal?.type === 'editStudent'} onClose={() => setModal(null)} title={`Modifier — ${modal?.data?.name}`} size="sm">
-        {modal?.data && (
-          <StudentForm initial={{ name: modal.data.name, username: modal.data.username, password: '', _isEdit: true }}
-            onSave={handleEditStudent} saving={saving} error={formErr} />
-        )}
+      <Modal
+        open={!!modal && modal.type === 'prof'}
+        onClose={() => { setModal(null); setFormErr(null) }}
+        title={modal?.isEdit ? `Modifier — ${modal?.data?.name}` : 'Créer un compte professeur'}
+        size="sm"
+      >
+        <AccountForm
+          fields={modal?.isEdit
+            ? { name: modal.data.name, username: modal.data.username, password: '' }
+            : { name: '', username: '', password: '' }
+          }
+          isEdit={modal?.isEdit}
+          saving={saving}
+          error={formErr}
+          onSave={form => handle(
+            modal?.isEdit
+              ? fields => updateProfessor(modal.data.id, fields)
+              : createProfessor,
+            form
+          )}
+        />
       </Modal>
 
-      <Modal open={modal?.type === 'createProf'} onClose={() => setModal(null)} title="Créer un compte professeur" size="sm">
-        <ProfForm initial={{ name: '', username: '', password: '', _isEdit: false }}
-          onSave={handleCreateProf} saving={saving} error={formErr} />
-      </Modal>
-
-      <Modal open={modal?.type === 'editProf'} onClose={() => setModal(null)} title={`Modifier — ${modal?.data?.name}`} size="sm">
-        {modal?.data && (
-          <ProfForm initial={{ name: modal.data.name, username: modal.data.username, password: '', _isEdit: true }}
-            onSave={handleEditProf} saving={saving} error={formErr} />
-        )}
-      </Modal>
-
-      {/* Confirm suppression */}
-      {delConfirm && (
-        <Modal open onClose={() => setDelConfirm(null)} title="Confirmer la suppression" size="sm">
+      {/* Confirmation suppression */}
+      {delId && (
+        <Modal open onClose={() => setDelId(null)} title="Confirmer la suppression" size="sm">
           <div className="form-stack">
             <div className="alert alert-red">
               <Icon name="alert" size={16} style={{ flexShrink: 0 }} />
               <div>
-                {delConfirm.type === 'student'
-                  ? <>Toutes les données de <strong>{delConfirm.name}</strong> seront supprimées définitivement.</>
-                  : <>Le compte de <strong>{delConfirm.name}</strong> sera supprimé.</>}
+                {delId.type === 'student'
+                  ? <>Toutes les données de <strong>{delId.name}</strong> seront supprimées définitivement.</>
+                  : <>Le compte de <strong>{delId.name}</strong> sera supprimé.</>
+                }
               </div>
             </div>
             <div className="btn-row">
-              <button className="btn-danger btn-full"
-                onClick={delConfirm.type === 'student' ? handleDeleteStudent : handleDeleteProf}>
+              <button className="btn-danger btn-full" onClick={handleDelete}>
                 <Icon name="trash" size={14} /> Supprimer
               </button>
-              <button onClick={() => setDelConfirm(null)}>Annuler</button>
+              <button onClick={() => setDelId(null)}>Annuler</button>
             </div>
           </div>
         </Modal>
