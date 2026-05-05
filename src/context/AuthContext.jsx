@@ -5,19 +5,24 @@ const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [role,        setRole]        = useState(null)   // 'prof' | 'student' | null
+  const [profId,      setProfId]      = useState(null)
+  const [profName,    setProfName]    = useState(null)
+  const [isOwner,     setIsOwner]     = useState(false)
   const [studentId,   setStudentId]   = useState(null)
   const [studentName, setStudentName] = useState(null)
   const [students,    setStudents]    = useState([])
-  const [profPwd,     setProfPwd]     = useState('prof2024')
+  const [professors,  setProfessors]  = useState([])
   const [authLoading, setAuthLoading] = useState(true)
   const [dbError,     setDbError]     = useState(null)
 
   useEffect(() => {
-    // Restaurer la session depuis localStorage
     try {
       const saved = JSON.parse(localStorage.getItem('eduspace_session') || 'null')
       if (saved?.role) {
         setRole(saved.role)
+        setProfId(saved.profId || null)
+        setProfName(saved.profName || null)
+        setIsOwner(saved.isOwner || false)
         setStudentId(saved.studentId || null)
         setStudentName(saved.studentName || null)
       }
@@ -27,32 +32,35 @@ export function AuthProvider({ children }) {
 
   async function loadInit() {
     try {
-      const [s, settings] = await Promise.all([
+      const [s, p] = await Promise.all([
         supabase.from('students').select('*').order('name'),
-        supabase.from('settings').select('*'),
+        supabase.from('professors').select('*').order('name'),
       ])
       if (s.error) throw s.error
+      if (p.error) throw p.error
       setStudents(s.data ?? [])
-      if (settings.data) {
-        const p = settings.data.find(x => x.key === 'prof_pwd')
-        if (p) setProfPwd(p.value)
-      }
+      setProfessors(p.data ?? [])
     } catch (e) {
-      console.error('AuthContext error:', e)
-      setDbError('Impossible de se connecter à Supabase. Vérifie ton .env.')
+      console.error(e)
+      setDbError('Impossible de se connecter à Supabase.')
     }
     setAuthLoading(false)
   }
 
-  function persist(role, studentId, studentName) {
-    localStorage.setItem('eduspace_session', JSON.stringify({ role, studentId, studentName }))
+  function persist(data) {
+    localStorage.setItem('eduspace_session', JSON.stringify(data))
   }
 
-  // ── Connexions ───────────────────────────────────────────────────
-  function loginProf(password) {
-    if (password !== profPwd) return false
-    setRole('prof'); setStudentId(null); setStudentName(null)
-    persist('prof', null, null)
+  // ── Connexions ─────────────────────────────────────────────────
+  function loginProf(username, password) {
+    const prof = professors.find(
+      p => p.username.toLowerCase() === username.trim().toLowerCase() && p.password === password
+    )
+    if (!prof) return false
+    setRole('prof')
+    setProfId(prof.id); setProfName(prof.name); setIsOwner(prof.is_owner)
+    setStudentId(null); setStudentName(null)
+    persist({ role: 'prof', profId: prof.id, profName: prof.name, isOwner: prof.is_owner, studentId: null, studentName: null })
     return true
   }
 
@@ -62,61 +70,71 @@ export function AuthProvider({ children }) {
     )
     if (!student) return false
     setRole('student'); setStudentId(student.id); setStudentName(student.name)
-    persist('student', student.id, student.name)
+    persist({ role: 'student', studentId: student.id, studentName: student.name })
     return true
   }
 
-  // Le prof entre dans l'espace d'un élève
   function selectStudent(student) {
-    setStudentId(student.id)
-    setStudentName(student.name)
-    persist('prof', student.id, student.name)
+    setStudentId(student.id); setStudentName(student.name)
+    persist({ role: 'prof', profId, profName, isOwner, studentId: student.id, studentName: student.name })
   }
 
-  // Le prof revient au tableau de bord
   function backToDashboard() {
     setStudentId(null); setStudentName(null)
-    persist('prof', null, null)
+    persist({ role: 'prof', profId, profName, isOwner, studentId: null, studentName: null })
   }
 
   function logout() {
-    setRole(null); setStudentId(null); setStudentName(null)
+    setRole(null); setProfId(null); setProfName(null); setIsOwner(false)
+    setStudentId(null); setStudentName(null)
     localStorage.removeItem('eduspace_session')
   }
 
-  // ── Gestion des élèves (prof) ────────────────────────────────────
+  // ── Gestion élèves ─────────────────────────────────────────────
   async function createStudent({ name, username, password }) {
-    const { data, error } = await supabase
-      .from('students').insert([{ name, username, password }]).select()
-    if (!error && data) {
-      setStudents(p => [...p, data[0]].sort((a, b) => a.name.localeCompare(b.name)))
-    }
+    const { data, error } = await supabase.from('students').insert([{ name, username, password }]).select()
+    if (!error && data) setStudents(p => [...p, data[0]].sort((a,b) => a.name.localeCompare(b.name)))
     return error
   }
-
   async function updateStudent(id, fields) {
     const { error } = await supabase.from('students').update(fields).eq('id', id)
     if (!error) setStudents(p => p.map(s => s.id === id ? { ...s, ...fields } : s))
     return error
   }
-
   async function deleteStudent(id) {
     const { error } = await supabase.from('students').delete().eq('id', id)
     if (!error) setStudents(p => p.filter(s => s.id !== id))
     return error
   }
 
-  async function updateProfPwd(newPwd) {
-    const { error } = await supabase.from('settings').upsert({ key: 'prof_pwd', value: newPwd })
-    if (!error) setProfPwd(newPwd)
+  // ── Gestion professeurs (owner seulement) ──────────────────────
+  async function createProfessor({ name, username, password }) {
+    const { data, error } = await supabase.from('professors')
+      .insert([{ name, username, password, is_owner: false }]).select()
+    if (!error && data) setProfessors(p => [...p, data[0]].sort((a,b) => a.name.localeCompare(b.name)))
+    return error
+  }
+  async function updateProfessor(id, fields) {
+    const { error } = await supabase.from('professors').update(fields).eq('id', id)
+    if (!error) setProfessors(p => p.map(pr => pr.id === id ? { ...pr, ...fields } : pr))
+    return error
+  }
+  async function deleteProfessor(id) {
+    const { error } = await supabase.from('professors').delete().eq('id', id)
+    if (!error) setProfessors(p => p.filter(pr => pr.id !== id))
     return error
   }
 
   return (
     <AuthContext.Provider value={{
-      role, studentId, studentName, students, profPwd, authLoading, dbError,
-      loginProf, loginStudent, selectStudent, backToDashboard, logout,
-      createStudent, updateStudent, deleteStudent, updateProfPwd,
+      role, profId, profName, isOwner,
+      studentId, studentName,
+      students, professors,
+      authLoading, dbError,
+      loginProf, loginStudent,
+      selectStudent, backToDashboard, logout,
+      createStudent, updateStudent, deleteStudent,
+      createProfessor, updateProfessor, deleteProfessor,
     }}>
       {children}
     </AuthContext.Provider>

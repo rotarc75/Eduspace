@@ -4,39 +4,128 @@ import { supabase } from '../lib/supabase'
 import Icon from '../shared/Icon'
 import Modal from '../shared/Modal'
 
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : null
-const fmtShort = (d) => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null
-
-// Couleurs d'accent pour chaque élève (cycle)
-const COLORS = [
+const fmtDate  = d => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' }) : null
+const fmtShort = d => d ? new Date(d).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' }) : null
+const COLORS   = [
   { bg: 'var(--maths-bg)',  border: 'var(--maths-border)',  text: 'var(--maths)'  },
   { bg: 'var(--infos-bg)',  border: 'var(--infos-border)',  text: 'var(--infos)'  },
   { bg: 'var(--amber-bg)',  border: 'var(--amber-border)',  text: 'var(--amber)'  },
   { bg: 'var(--purple-bg)', border: 'var(--purple-border)', text: 'var(--purple)' },
   { bg: 'var(--green-bg)',  border: 'var(--green-border)',  text: 'var(--green)'  },
 ]
+const initials = n => n?.split(' ').map(w => w[0]).join('').toUpperCase().slice(0,2) ?? '?'
 
-function initials(name) {
-  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
+function StudentCard({ student, color, stat, onSelect, onEdit, onDelete }) {
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ padding: '1.125rem 1.25rem 0.875rem', background: color.bg, borderBottom: `1px solid ${color.border}`, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: color.text, flexShrink: 0 }}>
+          {initials(student.name)}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>{student.name}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{student.username}</div>
+        </div>
+      </div>
+      <div style={{ padding: '0.875rem 1.25rem' }}>
+        <div style={{ display: 'flex', gap: '1.25rem', marginBottom: 10, flexWrap: 'wrap' }}>
+          {[
+            { val: stat?.devoirsPending, label: 'devoir(s)' },
+            { val: stat?.ticketsOpen,    label: 'ticket(s)' },
+            { val: stat?.totalSessions,  label: 'séance(s)' },
+          ].map(({ val, label }) => (
+            <div key={label} style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{val ?? '—'}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+        {stat?.lastSession && <div style={{ fontSize: 12, color: 'var(--text-hint)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="pen" size={11} /> Dernière séance : {fmtDate(stat.lastSession)}</div>}
+        {student.next_session && <div style={{ fontSize: 12, color: 'var(--maths)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="calendar" size={11} /> Prochaine : {fmtShort(student.next_session)}</div>}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn-primary" style={{ flex: 1, justifyContent: 'center', fontSize: 13 }} onClick={onSelect}>
+            Accéder <Icon name="chevron-right" size={13} />
+          </button>
+          <button className="btn-icon" style={{ padding: 7 }} onClick={onEdit} title="Modifier"><Icon name="pen" size={14} /></button>
+          <button className="btn-icon btn-danger" style={{ padding: 7 }} onClick={onDelete} title="Supprimer"><Icon name="trash" size={14} /></button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StudentForm({ initial, onSave, saving, error }) {
+  const [form, setForm] = useState(initial)
+  return (
+    <div className="form-stack">
+      <div className="form-group">
+        <label className="form-label">Nom complet *</label>
+        <input placeholder="Ex : Marie Dupont" value={form.name} autoFocus
+          onChange={e => setForm({ ...form, name: e.target.value })} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Identifiant de connexion *</label>
+        <input placeholder="Ex : marie.dupont" value={form.username}
+          onChange={e => setForm({ ...form, username: e.target.value })} />
+        <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>L'élève l'utilise pour se connecter.</div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Mot de passe *</label>
+        <input type="password" placeholder="••••••••" value={form.password}
+          onChange={e => setForm({ ...form, password: e.target.value })}
+          onKeyDown={e => e.key === 'Enter' && onSave(form)} />
+        {initial.password === '' && <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>Laisser vide pour ne pas changer.</div>}
+      </div>
+      {error && <div style={{ fontSize: 12, color: 'var(--red)' }}><Icon name="alert" size={12} /> {error}</div>}
+      <button className="btn-primary btn-full" onClick={() => onSave(form)} disabled={!form.name.trim() || !form.username.trim() || saving}>
+        {saving ? 'Enregistrement…' : initial._isEdit ? 'Mettre à jour' : 'Créer le compte'}
+      </button>
+    </div>
+  )
+}
+
+function ProfForm({ initial, onSave, saving, error }) {
+  const [form, setForm] = useState(initial)
+  return (
+    <div className="form-stack">
+      <div className="form-group">
+        <label className="form-label">Nom *</label>
+        <input placeholder="Ex : Dr. Martin" value={form.name} autoFocus
+          onChange={e => setForm({ ...form, name: e.target.value })} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Identifiant *</label>
+        <input placeholder="Ex : martin" value={form.username}
+          onChange={e => setForm({ ...form, username: e.target.value })} />
+      </div>
+      <div className="form-group">
+        <label className="form-label">Mot de passe {initial._isEdit ? '(laisser vide = inchangé)' : '*'}</label>
+        <input type="password" placeholder="••••••••" value={form.password}
+          onChange={e => setForm({ ...form, password: e.target.value })}
+          onKeyDown={e => e.key === 'Enter' && onSave(form)} />
+      </div>
+      {error && <div style={{ fontSize: 12, color: 'var(--red)' }}><Icon name="alert" size={12} /> {error}</div>}
+      <button className="btn-primary btn-full" onClick={() => onSave(form)}
+        disabled={!form.name.trim() || !form.username.trim() || (!initial._isEdit && !form.password) || saving}>
+        {saving ? 'Enregistrement…' : initial._isEdit ? 'Mettre à jour' : 'Créer le compte'}
+      </button>
+    </div>
+  )
 }
 
 export default function ProfDashboard() {
-  const { students, selectStudent, logout, createStudent, deleteStudent, updateStudent } = useAuth()
+  const { students, professors, profId, profName, isOwner, selectStudent, logout,
+          createStudent, updateStudent, deleteStudent,
+          createProfessor, updateProfessor, deleteProfessor } = useAuth()
 
-  const [stats,       setStats]       = useState({})  // studentId → { devoirs, tickets, lastSession }
-  const [showCreate,  setShowCreate]  = useState(false)
-  const [editStudent, setEditStudent] = useState(null)
-  const [delConfirm,  setDelConfirm]  = useState(null)
-  const [saving,      setSaving]      = useState(false)
-  const [form, setForm] = useState({ name: '', username: '', password: '' })
-  const [editForm, setEditForm] = useState({ name: '', username: '', password: '' })
-  const [formErr, setFormErr] = useState(null)
+  const [stats,      setStats]      = useState({})
+  const [activeTab,  setActiveTab]  = useState('students')  // 'students' | 'professors'
+  const [modal,      setModal]      = useState(null)  // { type, data? }
+  const [saving,     setSaving]     = useState(false)
+  const [formErr,    setFormErr]    = useState(null)
+  const [delConfirm, setDelConfirm] = useState(null)
 
-  // Charger les stats de tous les élèves
-  useEffect(() => {
-    if (students.length === 0) return
-    loadStats()
-  }, [students])
+  useEffect(() => { if (students.length) loadStats() }, [students])
 
   async function loadStats() {
     const ids = students.map(s => s.id)
@@ -47,283 +136,216 @@ export default function ProfDashboard() {
     ])
     const s = {}
     ids.forEach(id => {
-      const devoirsData = (devs.data ?? []).filter(d => d.student_id === id)
-      const ticketsData = (ticks.data ?? []).filter(t => t.student_id === id)
-      const journalData = (jours.data ?? []).filter(j => j.student_id === id)
-      s[id] = {
-        devoirsPending: devoirsData.filter(d => !d.done).length,
-        ticketsOpen:    ticketsData.filter(t => t.statut === 'ouvert').length,
-        lastSession:    journalData[0]?.date ?? null,
-        totalSessions:  journalData.length,
-      }
+      const devs_   = (devs.data  ?? []).filter(d => d.student_id === id)
+      const ticks_  = (ticks.data ?? []).filter(t => t.student_id === id)
+      const jours_  = (jours.data ?? []).filter(j => j.student_id === id)
+      s[id] = { devoirsPending: devs_.filter(d => !d.done).length, ticketsOpen: ticks_.filter(t => t.statut === 'ouvert').length, lastSession: jours_[0]?.date ?? null, totalSessions: jours_.length }
     })
     setStats(s)
   }
 
-  async function handleCreate() {
-    if (!form.name.trim() || !form.username.trim() || !form.password.trim()) {
-      setFormErr('Tous les champs sont obligatoires.'); return
-    }
+  async function handleCreateStudent(form) {
+    if (!form.name.trim() || !form.username.trim() || !form.password) { setFormErr('Tous les champs sont requis.'); return }
     setSaving(true)
     const err = await createStudent(form)
     setSaving(false)
     if (err) { setFormErr(err.message); return }
-    setForm({ name: '', username: '', password: '' })
-    setFormErr(null)
-    setShowCreate(false)
+    setModal(null); setFormErr(null)
   }
 
-  async function handleEdit() {
-    if (!editForm.name.trim() || !editForm.username.trim()) {
-      setFormErr('Nom et identifiant obligatoires.'); return
-    }
+  async function handleEditStudent(form) {
+    const fields = { name: form.name.trim(), username: form.username.trim() }
+    if (form.password.trim()) fields.password = form.password.trim()
     setSaving(true)
-    const fields = { name: editForm.name.trim(), username: editForm.username.trim() }
-    if (editForm.password.trim()) fields.password = editForm.password.trim()
-    const err = await updateStudent(editStudent.id, fields)
+    const err = await updateStudent(modal.data.id, fields)
     setSaving(false)
     if (err) { setFormErr(err.message); return }
-    setEditStudent(null); setFormErr(null)
+    setModal(null); setFormErr(null)
   }
 
-  async function handleDelete() {
-    if (!delConfirm) return
+  async function handleDeleteStudent() {
     await deleteStudent(delConfirm.id)
     setDelConfirm(null)
   }
 
-  function openEdit(student) {
-    setEditStudent(student)
-    setEditForm({ name: student.name, username: student.username, password: '' })
-    setFormErr(null)
+  async function handleCreateProf(form) {
+    if (!form.name.trim() || !form.username.trim() || !form.password) { setFormErr('Tous les champs sont requis.'); return }
+    setSaving(true)
+    const err = await createProfessor(form)
+    setSaving(false)
+    if (err) { setFormErr(err.message); return }
+    setModal(null); setFormErr(null)
+  }
+
+  async function handleEditProf(form) {
+    const fields = { name: form.name.trim(), username: form.username.trim() }
+    if (form.password.trim()) fields.password = form.password.trim()
+    setSaving(true)
+    const err = await updateProfessor(modal.data.id, fields)
+    setSaving(false)
+    if (err) { setFormErr(err.message); return }
+    setModal(null); setFormErr(null)
+  }
+
+  async function handleDeleteProf() {
+    await deleteProfessor(delConfirm.id)
+    setDelConfirm(null)
   }
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-page)' }}>
       {/* Header */}
-      <div style={{
-        background: 'var(--bg-sidebar)',
-        borderBottom: '1px solid var(--border)',
-        padding: '1rem 2rem',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      }}>
+      <div style={{ background: 'var(--bg-sidebar)', borderBottom: '1px solid var(--border)', padding: '1rem 2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: 8,
-            background: 'var(--maths-bg)', border: '1px solid var(--maths-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--maths-bg)', border: '1px solid var(--maths-border)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Icon name="book" size={16} style={{ color: 'var(--maths)' }} />
           </div>
           <span style={{ fontWeight: 700, fontSize: 15 }}>EduSpace</span>
-          <span style={{ color: 'var(--text-hint)', fontSize: 13, marginLeft: 4 }}>— Tableau de bord prof</span>
+          <span style={{ color: 'var(--text-hint)', fontSize: 13, marginLeft: 4 }}>
+            — {profName}
+            {isOwner && <span style={{ marginLeft: 6, fontSize: 11, background: 'var(--amber-bg)', color: 'var(--amber)', border: '1px solid var(--amber-border)', borderRadius: 20, padding: '1px 7px' }}>Propriétaire</span>}
+          </span>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn-primary" onClick={() => { setShowCreate(true); setFormErr(null) }}>
+          <button className="btn-primary" onClick={() => { setModal({ type: 'createStudent' }); setFormErr(null) }}>
             <Icon name="plus" size={14} /> Nouvel élève
           </button>
+          {isOwner && (
+            <button onClick={() => { setModal({ type: 'createProf' }); setFormErr(null) }}>
+              <Icon name="plus" size={14} /> Nouveau prof
+            </button>
+          )}
           <button className="btn-ghost" onClick={logout} style={{ fontSize: 12 }}>
             <Icon name="log-out" size={13} /> Déconnexion
           </button>
         </div>
       </div>
 
-      {/* Content */}
-      <div style={{ padding: '2rem', maxWidth: 960, margin: '0 auto' }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>Mes élèves</h1>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.75rem' }}>
-          {students.length} élève{students.length !== 1 ? 's' : ''} · Clique sur un élève pour accéder à son espace
-        </p>
+      <div style={{ padding: '2rem', maxWidth: 1000, margin: '0 auto' }}>
 
-        {/* Empty state */}
-        {students.length === 0 && (
-          <div className="empty-state card" style={{ padding: '4rem 2rem' }}>
-            <Icon name="user" size={40} />
-            <h2 style={{ color: 'var(--text-muted)', marginTop: 8 }}>Aucun élève pour l'instant</h2>
-            <p>Crée ton premier compte élève pour commencer</p>
-            <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => setShowCreate(true)}>
-              <Icon name="plus" size={14} /> Créer un élève
+        {/* Tabs */}
+        {isOwner && (
+          <div className="ticket-filters" style={{ marginBottom: '1.5rem' }}>
+            <button className={`filter-btn ${activeTab === 'students' ? 'active' : ''}`} onClick={() => setActiveTab('students')}>
+              Mes élèves ({students.length})
+            </button>
+            <button className={`filter-btn ${activeTab === 'professors' ? 'active' : ''}`} onClick={() => setActiveTab('professors')}>
+              Professeurs ({professors.length})
             </button>
           </div>
         )}
 
-        {/* Student grid */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: 16,
-        }}>
-          {students.map((student, i) => {
-            const color  = COLORS[i % COLORS.length]
-            const stat   = stats[student.id] ?? {}
-            const hasDevoirsUrgents = stat.devoirsPending > 0
-            const hasTickets        = stat.ticketsOpen > 0
-            return (
-              <div
-                key={student.id}
-                className="card"
-                style={{ padding: 0, overflow: 'hidden', cursor: 'pointer' }}
-                onClick={() => selectStudent(student)}
-              >
-                {/* Card top */}
-                <div style={{
-                  padding: '1.25rem 1.25rem 1rem',
-                  background: color.bg,
-                  borderBottom: `1px solid ${color.border}`,
-                  display: 'flex', alignItems: 'center', gap: 12,
-                }}>
-                  <div style={{
-                    width: 44, height: 44, borderRadius: '50%',
-                    background: 'rgba(0,0,0,0.08)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 16, fontWeight: 700, color: color.text, flexShrink: 0,
-                  }}>
-                    {initials(student.name)}
+        {/* ── Élèves ─────────────────────────────────────────────── */}
+        {activeTab === 'students' && (
+          <>
+            <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>Mes élèves</h1>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.75rem' }}>
+              {students.length} élève{students.length !== 1 ? 's' : ''} · Clique sur un élève pour accéder à son espace
+            </p>
+            {students.length === 0 ? (
+              <div className="empty-state card" style={{ padding: '4rem 2rem' }}>
+                <Icon name="user" size={40} />
+                <h2 style={{ color: 'var(--text-muted)', marginTop: 8 }}>Aucun élève pour l'instant</h2>
+                <button className="btn-primary" style={{ marginTop: 16 }} onClick={() => { setModal({ type: 'createStudent' }); setFormErr(null) }}>
+                  <Icon name="plus" size={14} /> Créer un élève
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
+                {students.map((student, i) => (
+                  <StudentCard key={student.id}
+                    student={student}
+                    color={COLORS[i % COLORS.length]}
+                    stat={stats[student.id]}
+                    onSelect={() => selectStudent(student)}
+                    onEdit={() => { setModal({ type: 'editStudent', data: student }); setFormErr(null) }}
+                    onDelete={() => setDelConfirm({ type: 'student', ...student })}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Professeurs (owner only) ────────────────────────────── */}
+        {activeTab === 'professors' && isOwner && (
+          <>
+            <h1 style={{ fontSize: 22, fontWeight: 600, marginBottom: 6 }}>Comptes professeurs</h1>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: '1.75rem' }}>
+              Les professeurs ont accès à tous les élèves. Seul le propriétaire peut gérer les comptes professeurs.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {professors.map(prof => (
+                <div key={prof.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--maths-bg)', border: '1px solid var(--maths-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, color: 'var(--maths)', flexShrink: 0 }}>
+                    {initials(prof.name)}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>
-                      {student.name}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 500 }}>{prof.name}</span>
+                      {prof.is_owner && <span style={{ fontSize: 11, background: 'var(--amber-bg)', color: 'var(--amber)', border: '1px solid var(--amber-border)', borderRadius: 20, padding: '1px 7px' }}>Propriétaire</span>}
+                      {prof.id === profId && <span style={{ fontSize: 11, background: 'var(--green-bg)', color: 'var(--green)', border: '1px solid var(--green-border)', borderRadius: 20, padding: '1px 7px' }}>Vous</span>}
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      @{student.username}
-                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>@{prof.username}</div>
                   </div>
-                </div>
-
-                {/* Card stats */}
-                <div style={{ padding: '0.875rem 1.25rem' }}>
-                  <div style={{ display: 'flex', gap: '1.5rem', marginBottom: 10, flexWrap: 'wrap' }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: hasDevoirsUrgents ? 'var(--amber)' : 'var(--text)', lineHeight: 1 }}>
-                        {stat.devoirsPending ?? '—'}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>devoir{stat.devoirsPending !== 1 ? 's' : ''} en cours</div>
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: 20, fontWeight: 700, color: hasTickets ? 'var(--amber)' : 'var(--text)', lineHeight: 1 }}>
-                        {stat.ticketsOpen ?? '—'}
-                      </div>
-                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>ticket{stat.ticketsOpen !== 1 ? 's' : ''} ouvert{stat.ticketsOpen !== 1 ? 's' : ''}</div>
-                    </div>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{stat.totalSessions ?? '—'}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 2 }}>séance{stat.totalSessions !== 1 ? 's' : ''}</div>
-                    </div>
-                  </div>
-
-                  {stat.lastSession && (
-                    <div style={{ fontSize: 12, color: 'var(--text-hint)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10 }}>
-                      <Icon name="pen" size={11} /> Dernière séance : {fmtDate(stat.lastSession)}
+                  {!prof.is_owner && (
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                      <button className="btn-icon" onClick={() => { setModal({ type: 'editProf', data: prof }); setFormErr(null) }} title="Modifier">
+                        <Icon name="pen" size={14} />
+                      </button>
+                      <button className="btn-icon btn-danger" onClick={() => setDelConfirm({ type: 'prof', ...prof })} title="Supprimer">
+                        <Icon name="trash" size={14} />
+                      </button>
                     </div>
                   )}
-                  {student.next_session && (
-                    <div style={{ fontSize: 12, color: 'var(--maths)', display: 'flex', alignItems: 'center', gap: 4, marginBottom: 10 }}>
-                      <Icon name="calendar" size={11} /> Prochaine séance : {fmtShort(student.next_session)}
-                    </div>
-                  )}
-
-                  <div style={{ display: 'flex', gap: 6, justifyContent: 'space-between', alignItems: 'center' }}>
-                    <button
-                      className="btn-primary"
-                      style={{ flex: 1, justifyContent: 'center', fontSize: 13 }}
-                      onClick={e => { e.stopPropagation(); selectStudent(student) }}
-                    >
-                      Accéder <Icon name="chevron-right" size={13} />
-                    </button>
-                    <button
-                      className="btn-icon"
-                      onClick={e => { e.stopPropagation(); openEdit(student) }}
-                      title="Modifier"
-                      style={{ padding: 7 }}
-                    >
-                      <Icon name="pen" size={14} />
-                    </button>
-                    <button
-                      className="btn-icon btn-danger"
-                      onClick={e => { e.stopPropagation(); setDelConfirm(student) }}
-                      title="Supprimer"
-                      style={{ padding: 7 }}
-                    >
-                      <Icon name="trash" size={14} />
-                    </button>
-                  </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Modal — Créer un élève */}
-      <Modal open={showCreate} onClose={() => { setShowCreate(false); setFormErr(null) }} title="Créer un compte élève" size="sm">
-        <div className="form-stack">
-          <div className="form-group">
-            <label className="form-label">Nom complet *</label>
-            <input placeholder="Ex : Marie Dupont" value={form.name}
-              onChange={e => { setForm({ ...form, name: e.target.value }); setFormErr(null) }} autoFocus />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Identifiant de connexion *</label>
-            <input placeholder="Ex : marie.dupont" value={form.username}
-              onChange={e => { setForm({ ...form, username: e.target.value }); setFormErr(null) }} />
-            <div style={{ fontSize: 11, color: 'var(--text-hint)', marginTop: 3 }}>
-              Utilisé pour se connecter. Sans espaces.
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Mot de passe *</label>
-            <input type="password" placeholder="••••••••" value={form.password}
-              onChange={e => { setForm({ ...form, password: e.target.value }); setFormErr(null) }}
-              onKeyDown={e => e.key === 'Enter' && handleCreate()} />
-          </div>
-          {formErr && <div style={{ fontSize: 12, color: 'var(--red)' }}><Icon name="alert" size={12} /> {formErr}</div>}
-          <button className="btn-primary btn-full" onClick={handleCreate} disabled={saving}>
-            {saving ? 'Création…' : 'Créer le compte'}
-          </button>
-        </div>
+      {/* ── Modals ─────────────────────────────────────────────────── */}
+      <Modal open={modal?.type === 'createStudent'} onClose={() => setModal(null)} title="Créer un compte élève" size="sm">
+        <StudentForm initial={{ name: '', username: '', password: '', _isEdit: false }}
+          onSave={handleCreateStudent} saving={saving} error={formErr} />
       </Modal>
 
-      {/* Modal — Modifier un élève */}
-      {editStudent && (
-        <Modal open onClose={() => { setEditStudent(null); setFormErr(null) }} title={`Modifier — ${editStudent.name}`} size="sm">
-          <div className="form-stack">
-            <div className="form-group">
-              <label className="form-label">Nom complet</label>
-              <input value={editForm.name}
-                onChange={e => { setEditForm({ ...editForm, name: e.target.value }); setFormErr(null) }} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Identifiant de connexion</label>
-              <input value={editForm.username}
-                onChange={e => { setEditForm({ ...editForm, username: e.target.value }); setFormErr(null) }} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Nouveau mot de passe</label>
-              <input type="password" placeholder="Laisser vide pour ne pas changer" value={editForm.password}
-                onChange={e => { setEditForm({ ...editForm, password: e.target.value }); setFormErr(null) }} />
-            </div>
-            {formErr && <div style={{ fontSize: 12, color: 'var(--red)' }}><Icon name="alert" size={12} /> {formErr}</div>}
-            <button className="btn-primary btn-full" onClick={handleEdit} disabled={saving}>
-              {saving ? 'Enregistrement…' : 'Mettre à jour'}
-            </button>
-          </div>
-        </Modal>
-      )}
+      <Modal open={modal?.type === 'editStudent'} onClose={() => setModal(null)} title={`Modifier — ${modal?.data?.name}`} size="sm">
+        {modal?.data && (
+          <StudentForm initial={{ name: modal.data.name, username: modal.data.username, password: '', _isEdit: true }}
+            onSave={handleEditStudent} saving={saving} error={formErr} />
+        )}
+      </Modal>
 
-      {/* Modal — Confirmer suppression */}
+      <Modal open={modal?.type === 'createProf'} onClose={() => setModal(null)} title="Créer un compte professeur" size="sm">
+        <ProfForm initial={{ name: '', username: '', password: '', _isEdit: false }}
+          onSave={handleCreateProf} saving={saving} error={formErr} />
+      </Modal>
+
+      <Modal open={modal?.type === 'editProf'} onClose={() => setModal(null)} title={`Modifier — ${modal?.data?.name}`} size="sm">
+        {modal?.data && (
+          <ProfForm initial={{ name: modal.data.name, username: modal.data.username, password: '', _isEdit: true }}
+            onSave={handleEditProf} saving={saving} error={formErr} />
+        )}
+      </Modal>
+
+      {/* Confirm suppression */}
       {delConfirm && (
-        <Modal open onClose={() => setDelConfirm(null)} title="Supprimer cet élève ?" size="sm">
+        <Modal open onClose={() => setDelConfirm(null)} title="Confirmer la suppression" size="sm">
           <div className="form-stack">
             <div className="alert alert-red">
               <Icon name="alert" size={16} style={{ flexShrink: 0 }} />
               <div>
-                Toutes les données de <strong>{delConfirm.name}</strong> seront supprimées définitivement
-                (ressources, devoirs, journal, tickets).
+                {delConfirm.type === 'student'
+                  ? <>Toutes les données de <strong>{delConfirm.name}</strong> seront supprimées définitivement.</>
+                  : <>Le compte de <strong>{delConfirm.name}</strong> sera supprimé.</>}
               </div>
             </div>
             <div className="btn-row">
-              <button className="btn-danger btn-full" onClick={handleDelete}>
-                <Icon name="trash" size={14} /> Supprimer définitivement
+              <button className="btn-danger btn-full"
+                onClick={delConfirm.type === 'student' ? handleDeleteStudent : handleDeleteProf}>
+                <Icon name="trash" size={14} /> Supprimer
               </button>
               <button onClick={() => setDelConfirm(null)}>Annuler</button>
             </div>

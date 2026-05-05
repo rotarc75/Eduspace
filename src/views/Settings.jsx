@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 
 export default function Settings() {
-  const { updateProfPwd } = useAuth()
+  const { profId, updateProfessor } = useAuth()
   const [pwd,     setPwd]     = useState('')
   const [confirm, setConfirm] = useState('')
   const [msg,     setMsg]     = useState(null)
@@ -12,19 +12,19 @@ export default function Settings() {
     if (!pwd || pwd !== confirm) { setMsg({ type: 'error', text: 'Les mots de passe ne correspondent pas.' }); return }
     if (pwd.length < 4)          { setMsg({ type: 'error', text: 'Minimum 4 caractères.' }); return }
     setSaving(true)
-    const err = await updateProfPwd(pwd)
+    const err = await updateProfessor(profId, { password: pwd })
     setSaving(false)
-    if (err) setMsg({ type: 'error', text: 'Erreur lors de la sauvegarde.' })
+    if (err) setMsg({ type: 'error', text: 'Erreur : ' + err.message })
     else { setMsg({ type: 'success', text: 'Mot de passe modifié !' }); setPwd(''); setConfirm('') }
   }
 
   return (
     <div>
       <h1 className="page-title">Réglages</h1>
-      <p className="page-subtitle">Paramètres du compte professeur</p>
+      <p className="page-subtitle">Paramètres de votre compte</p>
       <div style={{ maxWidth: 420 }}>
         <div className="card">
-          <h2 style={{ marginBottom: '1rem' }}>Mot de passe professeur</h2>
+          <h2 style={{ marginBottom: '1rem' }}>Changer mon mot de passe</h2>
           <div className="form-stack">
             <div className="form-group">
               <label className="form-label">Nouveau mot de passe</label>
